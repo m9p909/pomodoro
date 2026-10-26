@@ -252,11 +252,11 @@ mod tests {
         let b = create_todo(&conn, "B", None, 2).unwrap();
         conn.execute_batch(&format!(
             "CREATE TRIGGER fail_reorder BEFORE UPDATE OF sort_order ON todos
-             WHEN NEW.id = '{}' AND NEW.sort_order = 0
+             WHEN NEW.id = '{}' AND NEW.sort_order = 1
              BEGIN
                  SELECT RAISE(ABORT, 'forced reorder failure');
              END;",
-            b.id
+            a.id
         ))
         .unwrap();
 
@@ -271,7 +271,9 @@ mod tests {
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap()
         };
-        assert_eq!(orders, vec![(a.id, 0), (b.id, 1)]);
+        assert_eq!(orders, vec![(a.id.clone(), 0), (b.id.clone(), 1)]);
+        assert_eq!(get_todo(&conn, &b.id).unwrap().sort_order, 1);
+        assert_eq!(get_todo(&conn, &a.id).unwrap().sort_order, 0);
     }
 
     #[test]
