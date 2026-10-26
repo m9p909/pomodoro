@@ -329,12 +329,28 @@ Expected: all pass. `pnpm build` creates `dist/`.
 **Files:**
 - Create: `src-tauri/src/domain.rs`, `src-tauri/src/error.rs`, `src-tauri/src/clock.rs`
 - Modify: `src-tauri/src/lib.rs` to add `mod clock; mod domain; mod error;`
+- Modify: `src-tauri/Cargo.toml` to add the Rust core dependencies
 
 **Interfaces:**
 - Produces: `AppError`, `Clock`, `SystemClock`, `TimerState`, `TimerPhase`, `TimerSnapshot`, `Todo`, `FocusRow`, `DailyAnalytics`, `WeeklyRow`, `WeeklyAnalytics`, `AnalyticsSnapshot`, `DataSnapshot`, `Bootstrap`, `TimerAlert`, `AlertKind`.
 - Produces: `validate_title(&str) -> Result<String, AppError>` and `validate_estimate(Option<i64>) -> Result<Option<i64>, AppError>`.
 
-- [ ] **Step 1: Write failing validation tests**
+- [ ] **Step 1: Add Rust dependencies**
+
+Add to `src-tauri/Cargo.toml`:
+
+```toml
+rusqlite = { version = "0.41.0", features = ["bundled"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+uuid = { version = "1.29.0", features = ["v4"] }
+specta = { version = "2.0.0-rc.27", features = ["derive"] }
+specta-typescript = "0.0.14"
+tauri-specta = { version = "2.0.0-rc.26", features = ["derive", "typescript"] }
+```
+
+Add `tempfile = "3"` under `[dev-dependencies]` for later repository tests.
+
+- [ ] **Step 2: Write failing validation tests**
 
 Add to `domain.rs`:
 
@@ -359,7 +375,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Implement domain and errors**
+- [ ] **Step 3: Implement domain and errors**
 
 Define `AppError` in `error.rs`:
 
@@ -454,7 +470,7 @@ pub struct TimerAlert { pub kind: AlertKind, pub audible: bool, pub title: Strin
 
 Implement the two validators exactly as tested.
 
-- [ ] **Step 3: Implement the clock abstraction**
+- [ ] **Step 4: Implement the clock abstraction**
 
 In `clock.rs`:
 
@@ -498,7 +514,7 @@ impl Clock for FakeClock {
 }
 ```
 
-- [ ] **Step 4: Run tests and static checks**
+- [ ] **Step 5: Run tests and static checks**
 
 ```bash
 cargo test --manifest-path src-tauri/Cargo.toml domain
@@ -521,19 +537,9 @@ Expected: validation tests pass; the crate compiles with unused warnings allowed
 - Produces: `repo::todos::{list_todos, get_todo, create_todo, update_todo, set_completed, soft_delete, reorder_todos}`.
 - Produces: `repo::settings::{load_settings, set_muted, increment_completed_focus_count}` and `StoredSettings { muted: bool, completed_focus_count: i64 }`.
 
-- [ ] **Step 1: Add Rust dependencies**
+- [ ] **Step 1: Confirm Rust dependencies**
 
-```toml
-rusqlite = { version = "0.41.0", features = ["bundled"] }
-chrono = { version = "0.4.45", features = ["serde"] }
-uuid = { version = "1.29.0", features = ["v4"] }
-thiserror = "2.0.21"
-specta = { version = "2.0.0-rc.27", features = ["derive"] }
-specta-typescript = "0.0.14"
-tauri-specta = { version = "2.0.0-rc.26", features = ["derive", "typescript"] }
-```
-
-Add `tempfile = "3"` under `[dev-dependencies]`.
+Task 2 already added `rusqlite`, `chrono`, `uuid`, `specta`, `specta-typescript`, `tauri-specta`, and the `tempfile` dev dependency. Confirm `src-tauri/Cargo.toml` contains them before continuing.
 
 - [ ] **Step 2: Write failing persistence tests**
 
