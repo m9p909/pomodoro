@@ -58,7 +58,8 @@ pub fn upsert_focus_time_tx(
 
 pub fn update_checkpoint(conn: &Connection, session_id: &str, now: i64) -> Result<(), AppError> {
     conn.execute(
-        "UPDATE focus_sessions SET last_checkpoint_at = ?2 WHERE id = ?1",
+        "UPDATE focus_sessions SET last_checkpoint_at = ?2
+         WHERE id = ?1 AND outcome = 'active'",
         params![session_id, now],
     )?;
 
@@ -158,6 +159,24 @@ mod tests {
         assert_eq!(todo_ms, 3_000);
         assert_eq!(unassigned_ms, 500);
         assert_eq!(checkpoint, 400);
+    }
+
+    #[test]
+    fn checkpoint_updates_do_not_move_past_end_for_finished_sessions() {
+        let conn = db::open_in_memory().unwrap();
+        insert_active_session(&conn, "finished", 100, None).unwrap();
+        finish_session(&conn, "finished", "completed", 200).unwrap();
+
+        update_checkpoint(&conn, "finished", 300).unwrap();
+
+        let checkpoint: i64 = conn
+            .query_row(
+                "SELECT last_checkpoint_at FROM focus_sessions WHERE id = 'finished'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(checkpoint, 200);
     }
 
     #[test]

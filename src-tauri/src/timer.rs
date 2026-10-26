@@ -6,8 +6,8 @@ use rusqlite::{Connection, OptionalExtension};
 use uuid::Uuid;
 
 use crate::domain::{
-    AlertKind, FOCUS_MS, LONG_BREAK_MS, SHORT_BREAK_MS, TimerAlert, TimerPhase, TimerSnapshot,
-    TimerState,
+    AlertKind, FOCUS_MS, LONG_BREAK_MS, SHORT_BREAK_MS, SLEEP_GAP_MS, TimerAlert, TimerPhase,
+    TimerSnapshot, TimerState,
 };
 use crate::error::AppError;
 use crate::repo::focus::{
@@ -246,6 +246,20 @@ impl TimerCore {
         Ok(())
     }
 
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
+    pub fn flush_all(&mut self, conn: &mut Connection, now_utc: i64) -> Result<(), AppError> {
+        self.flush_pending(conn, now_utc)?;
+        if self.has_pending() {
+            return Err(AppError::Storage(
+                "Focus time could not be saved before closing".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn tick(
         &mut self,
         conn: &mut Connection,
@@ -261,6 +275,17 @@ impl TimerCore {
         match self.state {
             TimerState::FocusRunning => {
                 let delta = self.delta(mono_ms);
+                if delta > SLEEP_GAP_MS {
+                    let _ = self.flush_pending(conn, utc_ms);
+                    self.state = TimerState::FocusPaused;
+                    self.last_mono_ms = None;
+                    return Ok(TickOutcome {
+                        snapshot: self.snapshot(conn)?,
+                        alert: None,
+                        data_changed: true,
+                    });
+                }
+
                 self.last_mono_ms = Some(mono_ms);
                 self.accrue_focus(delta, local_day);
                 let _ = self.flush_pending(conn, utc_ms);
@@ -278,6 +303,17 @@ impl TimerCore {
             }
             TimerState::BreakRunning => {
                 let delta = self.delta(mono_ms);
+                if delta > SLEEP_GAP_MS {
+                    let _ = self.flush_pending(conn, utc_ms);
+                    self.state = TimerState::BreakPaused;
+                    self.last_mono_ms = None;
+                    return Ok(TickOutcome {
+                        snapshot: self.snapshot(conn)?,
+                        alert: None,
+                        data_changed: true,
+                    });
+                }
+
                 self.last_mono_ms = Some(mono_ms);
                 let total_ms = self.phase_total_ms();
                 let credit = (delta as i64).min((total_ms - self.elapsed_ms).max(0));
@@ -510,7 +546,8 @@ mod tests {
         let first = h.todo_id.clone().unwrap();
         let second = h.second_todo();
         h.start();
-        h.tick(10_000);
+        h.tick(5_000);
+        h.tick(5_000);
         let before_pause = h.snapshot().remaining_ms;
 
         h.timer.pause(&mut h.conn, h.utc).unwrap();
@@ -711,6 +748,110 @@ mod tests {
         let mut h = Harness::new();
         h.start();
         h.tick(2_000);
+        let total: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(total, 2_000);
+    }
+
+    #[test]
+    fn sleep_gap_pauses_without_crediting_gap() {
+        let mut h = Harness::new();
+        h.timer
+            .start_focus(&mut h.conn, h.todo_id.clone(), h.utc, h.mono, &h.day)
+            .unwrap();
+        h.tick(1_000);
+        let before = h.timer.snapshot(&h.conn).unwrap().remaining_ms;
+        h.utc += 60_000;
+        h.mono += 60_000;
+        let out = h.timer.tick(&mut h.conn, h.utc, h.mono, &h.day).unwrap();
+        assert_eq!(out.snapshot.state, TimerState::FocusPaused);
+        assert_eq!(out.snapshot.remaining_ms, before);
+        assert!(out.data_changed);
+        let total: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(total, 1_000);
+    }
+
+    #[test]
+    fn sleep_gap_pauses_break_without_crediting_gap() {
+        let mut h = Harness::new();
+        h.start();
+        h.complete_focus();
+        h.timer.start_break(h.mono).unwrap();
+        h.tick(1_000);
+        let before = h.snapshot().remaining_ms;
+        h.utc += 60_000;
+        h.mono += 60_000;
+        let out = h.timer.tick(&mut h.conn, h.utc, h.mono, &h.day).unwrap();
+        assert_eq!(out.snapshot.state, TimerState::BreakPaused);
+        assert_eq!(out.snapshot.remaining_ms, before);
+        assert!(out.data_changed);
+    }
+
+    #[test]
+    fn startup_recovery_abandons_active_sessions() {
+        let mut h = Harness::new();
+        h.timer
+            .start_focus(&mut h.conn, h.todo_id.clone(), h.utc, h.mono, &h.day)
+            .unwrap();
+        h.tick(1_000);
+        let reloaded = TimerCore::load(&mut h.conn).unwrap();
+        assert_eq!(reloaded.snapshot(&h.conn).unwrap().state, TimerState::Idle);
+        let (outcome, ended_at): (String, Option<i64>) = h
+            .conn
+            .query_row("SELECT outcome, ended_at FROM focus_sessions", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(outcome, "abandoned");
+        assert_eq!(ended_at, Some(2_000));
+    }
+
+    #[test]
+    fn muted_completion_alert_is_silent() {
+        let mut h = Harness::new();
+        h.timer.set_muted(&mut h.conn, true).unwrap();
+        h.start();
+        let outcome = h.complete_focus();
+        assert!(!outcome.alert.unwrap().audible);
+    }
+
+    #[test]
+    fn flush_all_rejects_pending_data_until_it_can_be_saved() {
+        let mut h = Harness::new();
+        h.conn
+            .execute_batch(
+                "CREATE TRIGGER fail_focus_time BEFORE INSERT ON focus_time
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced checkpoint failure');
+                 END;",
+            )
+            .unwrap();
+
+        h.start();
+        h.tick(2_000);
+        assert!(h.timer.has_pending());
+        assert!(h.timer.flush_all(&mut h.conn, h.utc).is_err());
+        assert!(h.timer.has_pending());
+
+        h.conn
+            .execute_batch("DROP TRIGGER fail_focus_time;")
+            .unwrap();
+        h.timer.flush_all(&mut h.conn, h.utc).unwrap();
+        assert!(!h.timer.has_pending());
+
         let total: i64 = h
             .conn
             .query_row(
