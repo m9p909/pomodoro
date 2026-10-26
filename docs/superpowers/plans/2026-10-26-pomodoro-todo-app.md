@@ -343,8 +343,8 @@ Add to `src-tauri/Cargo.toml`:
 rusqlite = { version = "0.41.0", features = ["bundled"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 uuid = { version = "1.29.0", features = ["v4"] }
-specta = { version = "2.0.0-rc.27", features = ["derive"] }
-specta-typescript = "0.0.14"
+specta = { version = "=2.0.0-rc.26", features = ["derive"] }
+specta-typescript = "=0.0.13"
 tauri-specta = { version = "2.0.0-rc.26", features = ["derive", "typescript"] }
 ```
 
