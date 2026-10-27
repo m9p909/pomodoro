@@ -22,7 +22,6 @@ pub struct AppInner {
 }
 
 impl AppInner {
-    #[allow(dead_code)]
     pub fn new(mut conn: Connection, clock: Arc<dyn Clock>) -> Result<Self, AppError> {
         let timer = TimerCore::load(&mut conn)?;
         Ok(Self { conn, timer, clock })
@@ -131,7 +130,6 @@ impl AppInner {
         self.timer.snapshot(&self.conn)
     }
 
-    #[allow(dead_code)]
     pub fn tick(&mut self) -> Result<TickOutcome, AppError> {
         let (utc_ms, mono_ms, day) = self.now();
         self.timer.tick(&mut self.conn, utc_ms, mono_ms, &day)

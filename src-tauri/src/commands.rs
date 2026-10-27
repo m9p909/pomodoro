@@ -8,7 +8,6 @@ use crate::state::{AppInner, AppState};
 
 pub const EVENT_TIMER_SNAPSHOT: &str = "timer-snapshot";
 pub const EVENT_DATA_CHANGED: &str = "data-changed";
-#[allow(dead_code)]
 pub const EVENT_TIMER_ALERT: &str = "timer-alert";
 
 fn lock_inner(state: &AppState) -> Result<MutexGuard<'_, AppInner>, AppError> {

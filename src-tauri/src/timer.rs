@@ -27,7 +27,6 @@ struct PendingKey {
     local_day: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct TickOutcome {
     pub snapshot: TimerSnapshot,

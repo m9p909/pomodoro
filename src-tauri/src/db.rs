@@ -51,7 +51,6 @@ CREATE TABLE settings (
 INSERT INTO settings (id, muted, completed_focus_count) VALUES (1, 0, 0);
 "#;
 
-#[allow(dead_code)]
 pub fn open(path: impl AsRef<Path>) -> Result<Connection, AppError> {
     let mut conn = Connection::open(path)?;
     configure(&conn, true)?;

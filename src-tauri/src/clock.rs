@@ -10,12 +10,10 @@ pub trait Clock: Send + Sync {
     fn local_day(&self) -> String;
 }
 
-#[allow(dead_code)]
 pub struct SystemClock {
     start: Instant,
 }
 
-#[allow(dead_code)]
 impl SystemClock {
     pub fn new() -> Self {
         Self {
