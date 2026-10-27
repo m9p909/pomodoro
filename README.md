@@ -1,47 +1,91 @@
-# Svelte + TS + Vite
+# Pomodoro
 
-This template should help get you started developing with Svelte and TypeScript in Vite.
+A local-first desktop pomodoro and todo app for Linux, macOS, and Windows. A Rust
+core owns timing, persistence, validation, and analytics; a thin Svelte 5 frontend
+renders state and sends commands. Todos support optional pomodoro estimates, the
+fixed 25/5/15 focus and break cycle includes a long break after every fourth focus
+phase, and daily plus rolling seven-day insights show where focus time went.
 
-## Recommended IDE Setup
+The app works entirely offline. It has no accounts, cloud sync, telemetry, or
+network communication, and it stores all data locally in SQLite.
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode).
+## Prerequisites
 
-## Need an official Svelte framework?
+- **Rust 1.90+** with `rustfmt` and `clippy`
+- **Node.js 24.15+** and **pnpm 12** (the repository pins pnpm 12.8.1)
+- **Tauri OS dependencies** for your platform:
+  - **Linux:** `libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`,
+    `librsvg2-dev`, `patchelf`, plus `build-essential` and `pkg-config`
+  - **macOS:** Xcode Command Line Tools
+  - **Windows:** Microsoft C++ Build Tools and WebView2 (included with Windows 11
+    and up-to-date Windows 10)
 
-Check out [SvelteKit](https://github.com/sveltejs/kit#readme), which is also powered by Vite. Deploy anywhere with its serverless-first approach and adapt to various platforms, with out of the box support for TypeScript, SCSS, and Less, and easily-added support for mdsvex, GraphQL, PostCSS, Tailwind CSS, and more.
+On Debian/Ubuntu, install the Linux packages with:
 
-## Technical considerations
-
-**Why use this over SvelteKit?**
-
-- It brings its own routing solution which might not be preferable for some users.
-- It is first and foremost a framework that just happens to use Vite under the hood, not a Vite app.
-
-This template contains as little as possible to get started with Vite + TypeScript + Svelte, while taking into account the developer experience with regards to HMR and intellisense. It demonstrates capabilities on par with the other `create-vite` templates and is a good starting point for beginners dipping their toes into a Vite + Svelte project.
-
-Should you later need the extended capabilities and extensibility provided by SvelteKit, the template has been structured similarly to SvelteKit so that it is easy to migrate.
-
-**Why `global.d.ts` instead of `compilerOptions.types` inside `jsconfig.json` or `tsconfig.json`?**
-
-Setting `compilerOptions.types` shuts out all other types not explicitly listed in the configuration. Using triple-slash references keeps the default TypeScript setting of accepting type information from the entire workspace, while also adding `svelte` and `vite/client` type information.
-
-**Why include `.vscode/extensions.json`?**
-
-Other templates indirectly recommend extensions via the README, but this file allows VS Code to prompt the user to install the recommended extension upon opening the project.
-
-**Why enable `allowJs` in the TS template?**
-
-While `allowJs: false` would indeed prevent the use of `.js` files in the project, it does not prevent the use of JavaScript syntax in `.svelte` files. In addition, it would force `checkJs: false`, bringing the worst of both worlds: not being able to guarantee the entire codebase is TypeScript, and also having worse typechecking for the existing JavaScript. In addition, there are valid use cases in which a mixed codebase may be relevant.
-
-**Why is HMR not preserving my local component state?**
-
-HMR state preservation comes with a number of gotchas! It has been disabled by default in both `svelte-hmr` and `@sveltejs/vite-plugin-svelte` due to its often surprising behavior. You can read the details [here](https://github.com/rixo/svelte-hmr#svelte-hmr).
-
-If you have state that's important to retain within a component, consider creating an external store which would not be replaced by HMR.
-
-```ts
-// store.ts
-// An extremely simple external store
-import { writable } from 'svelte/store'
-export default writable(0)
+```bash
+sudo apt-get update
+sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf build-essential pkg-config
 ```
+
+## Development
+
+```bash
+pnpm install
+pnpm tauri dev
+```
+
+The Vite dev server runs at `http://localhost:1420` and Tauri opens the desktop
+window.
+
+## Checks and tests
+
+```bash
+pnpm check    # Svelte and TypeScript type checks
+pnpm test     # frontend unit tests
+```
+
+Rust formatting, linting, and tests:
+
+```bash
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml --all-features
+```
+
+## Building
+
+```bash
+pnpm tauri build
+```
+
+Platform-native bundles are written under `src-tauri/target/release/bundle/`.
+GitHub Actions builds releases from `v*` tags: Linux x86_64 AppImage and DEB,
+Windows x86_64 MSI, and a universal macOS DMG.
+
+## TypeScript bindings
+
+Rust command and event types generate the typed frontend bindings in
+`src/lib/bindings.ts`:
+
+```bash
+pnpm bindings
+```
+
+Regenerate and commit the bindings after changing Rust commands or shared types.
+CI fails if the committed bindings are out of date.
+
+## Local data
+
+All state lives in a SQLite database named `pomodoro.sqlite` in the OS application
+data directory for the `com.pomodorocontributors.pomodoro` bundle identifier:
+
+- Linux: `~/.local/share/com.pomodorocontributors.pomodoro/` (or under
+  `$XDG_DATA_HOME`)
+- macOS: `~/Library/Application Support/com.pomodorocontributors.pomodoro/`
+- Windows: `%APPDATA%\com.pomodorocontributors.pomodoro\`
+
+Back up that file to preserve your todos, focus history, and settings.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
