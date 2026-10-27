@@ -62,8 +62,9 @@
                 <span class="row-title">{row.title}</span>
                 <span class="row-metrics">
                   <span class="row-duration">{formatFocus(row.activeMs)}</span>
-                  <span class="row-progress" aria-label={progressDescription(row)}>
-                    {progressLabel(row)}
+                  <span class="row-progress">
+                    <span aria-hidden="true">{progressLabel(row)}</span>
+                    <span class="sr-only">{progressDescription(row)}</span>
                   </span>
                 </span>
               </div>

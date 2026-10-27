@@ -7,9 +7,13 @@
     activeTodoId: string | null;
     breakActive: boolean;
     onPlay?: (id: string) => void;
-    onCreate?: (title: string, estimate: number | null) => void;
-    onUpdate?: (id: string, title: string, estimate: number | null) => void;
-    onToggle?: (id: string, completed: boolean) => void;
+    onCreate?: (title: string, estimate: number | null) => boolean | void | Promise<boolean | void>;
+    onUpdate?: (
+      id: string,
+      title: string,
+      estimate: number | null,
+    ) => boolean | void | Promise<boolean | void>;
+    onToggle?: (id: string, completed: boolean) => boolean | void | Promise<boolean | void>;
     onDelete?: (id: string) => void;
     onReorder?: (ids: string[]) => void;
   };
@@ -53,7 +57,7 @@
     return estimate;
   }
 
-  function handleCreate(event: SubmitEvent) {
+  async function handleCreate(event: SubmitEvent) {
     event.preventDefault();
     const title = newTitle.trim();
     if (!title) {
@@ -69,7 +73,8 @@
       return;
     }
 
-    onCreate(title, estimate);
+    const succeeded = await onCreate(title, estimate);
+    if (succeeded === false) return;
     newTitle = "";
     newEstimate = "";
     createError = null;

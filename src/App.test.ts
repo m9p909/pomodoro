@@ -211,6 +211,18 @@ describe("App", () => {
     await waitFor(() => expect(state.play).toHaveBeenCalledOnce());
   });
 
+  it("plays an audible alert even when the timer snapshot is muted", async () => {
+    state.bootstrap.mockResolvedValue(
+      bootstrapData(timerSnapshot({ muted: true })),
+    );
+    const { getByText } = render(App);
+    await waitFor(() => expect(getByText("Start unassigned")).toBeTruthy());
+
+    state.listeners.get("timer-alert")!({ payload: alert({ audible: true }) });
+
+    await waitFor(() => expect(state.play).toHaveBeenCalledOnce());
+  });
+
   it("prevents close and keeps the app open when confirmation is declined", async () => {
     state.bootstrap.mockResolvedValue(
       bootstrapData(timerSnapshot({ state: "focusRunning", phase: "focus" })),
@@ -242,6 +254,48 @@ describe("App", () => {
     expect(event.preventDefault).toHaveBeenCalledOnce();
     expect(state.confirm).toHaveBeenCalledOnce();
     expect(state.closeApp).toHaveBeenCalledOnce();
+  });
+
+  it("asks for confirmation before ending focus", async () => {
+    state.bootstrap.mockResolvedValue(
+      bootstrapData(timerSnapshot({ state: "focusRunning", phase: "focus" })),
+    );
+    const { getByRole, getByText } = render(App);
+    await waitFor(() => expect(getByText("Pause")).toBeTruthy());
+
+    await fireEvent.click(getByRole("button", { name: "End focus" }));
+
+    await waitFor(() => expect(state.confirm).toHaveBeenCalledOnce());
+    expect(state.endFocus).not.toHaveBeenCalled();
+    expect(getByText("Pause")).toBeTruthy();
+  });
+
+  it("ends focus after the confirmation is approved", async () => {
+    state.bootstrap.mockResolvedValue(
+      bootstrapData(timerSnapshot({ state: "focusPaused", phase: "focus" })),
+    );
+    state.confirm.mockResolvedValue(true);
+    const { getByRole, getByText } = render(App);
+    await waitFor(() => expect(getByText("Resume")).toBeTruthy());
+
+    await fireEvent.click(getByRole("button", { name: "End focus" }));
+
+    await waitFor(() => expect(state.endFocus).toHaveBeenCalledOnce());
+    expect(state.confirm).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces an end focus command failure", async () => {
+    state.bootstrap.mockResolvedValue(
+      bootstrapData(timerSnapshot({ state: "focusRunning", phase: "focus" })),
+    );
+    state.confirm.mockResolvedValue(true);
+    state.endFocus.mockRejectedValueOnce(new Error("Could not end focus."));
+    const { getByRole, getByText } = render(App);
+    await waitFor(() => expect(getByText("Pause")).toBeTruthy());
+
+    await fireEvent.click(getByRole("button", { name: "End focus" }));
+
+    await waitFor(() => expect(getByText("Could not end focus.")).toBeTruthy());
   });
 
   it("prompts before closing while startup is still in progress", async () => {
@@ -299,6 +353,22 @@ describe("App", () => {
 
     await waitFor(() => expect(state.createTodo).toHaveBeenCalledWith("New task", null));
     await waitFor(() => expect(state.refreshData).toHaveBeenCalled());
+  });
+
+  it("keeps the create form when the create command fails", async () => {
+    state.createTodo.mockRejectedValueOnce(new Error("Could not save todo."));
+    const { getByLabelText, getByRole, getByText } = render(App);
+    await waitFor(() => expect(getByText("Start unassigned")).toBeTruthy());
+    const title = getByLabelText("New todo title") as HTMLInputElement;
+    const estimate = getByLabelText("Estimate (pomodoros)") as HTMLInputElement;
+
+    await fireEvent.input(title, { target: { value: "Keep me" } });
+    await fireEvent.input(estimate, { target: { value: "2" } });
+    await fireEvent.click(getByRole("button", { name: "Add todo" }));
+
+    await waitFor(() => expect(getByText("Could not save todo.")).toBeTruthy());
+    expect(title.value).toBe("Keep me");
+    expect(estimate.value).toBe("2");
   });
 
   it("reorders active todos and appends completed ids for the command", async () => {
@@ -368,6 +438,20 @@ describe("App", () => {
     await waitFor(() => expect(queryByText("Could not save mute state.")).toBeNull());
   });
 
+  it("clears a command error after a successful timer command", async () => {
+    state.setMuted.mockRejectedValueOnce(new Error("Could not save mute state."));
+    const { getByText, queryByText } = render(App);
+    await waitFor(() => expect(getByText("Start unassigned")).toBeTruthy());
+
+    await fireEvent.click(getByText("Mute"));
+    await waitFor(() => expect(getByText("Could not save mute state.")).toBeTruthy());
+
+    await fireEvent.click(getByText("Start unassigned"));
+
+    await waitFor(() => expect(state.startFocus).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(queryByText("Could not save mute state.")).toBeNull());
+  });
+
   it("keeps a newer timer snapshot that arrives while bootstrap is resolving", async () => {
     const pending = deferred<Bootstrap>();
     state.bootstrap.mockReturnValueOnce(pending.promise);
@@ -386,6 +470,26 @@ describe("App", () => {
     await waitFor(() => expect(getByText("Pause")).toBeTruthy());
     expect(getAllByText("20:34")).toHaveLength(2);
     expect(queryByText("Start unassigned")).toBeNull();
+  });
+
+  it("does not overwrite data-changed results with an older bootstrap payload", async () => {
+    const pending = deferred<Bootstrap>();
+    state.bootstrap.mockReturnValueOnce(pending.promise);
+    state.refreshData.mockResolvedValue({
+      todos: [todo({ id: "fresh", title: "Fresh data" })],
+      analytics,
+    });
+    const { getByText, queryByText } = render(App);
+    await waitFor(() => expect(state.listeners.has("data-changed")).toBe(true));
+
+    state.listeners.get("data-changed")!({ payload: null });
+    await waitFor(() => expect(state.refreshData).toHaveBeenCalledOnce());
+    pending.resolve(
+      bootstrapData(timerSnapshot(), [todo({ id: "stale", title: "Stale data" })]),
+    );
+
+    await waitFor(() => expect(getByText("Fresh data")).toBeTruthy());
+    expect(queryByText("Stale data")).toBeNull();
   });
 
   it("keeps a degraded subscription banner after bootstrap succeeds", async () => {
@@ -411,6 +515,18 @@ describe("App", () => {
 
     expect(queryByText("Could not save mute state.")).toBeNull();
     expect(getByText("Live updates degraded")).toBeTruthy();
+  });
+
+  it("shows a fatal startup error and retries bootstrap", async () => {
+    state.bootstrap.mockRejectedValueOnce(new Error("Database unavailable"));
+    const { getByText } = render(App);
+
+    await waitFor(() => expect(getByText("Database unavailable")).toBeTruthy());
+
+    state.bootstrap.mockResolvedValue(bootstrapData());
+    await fireEvent.click(getByText("Try again"));
+
+    await waitFor(() => expect(getByText("Start unassigned")).toBeTruthy());
   });
 
   it("renders the insights dashboard on the insights tab", async () => {

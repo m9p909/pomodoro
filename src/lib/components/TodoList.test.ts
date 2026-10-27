@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import TodoList from "./TodoList.svelte";
 import type { Todo } from "../bindings";
@@ -53,6 +53,35 @@ describe("TodoList", () => {
     });
     await fireEvent.click(getByRole("button", { name: "Add todo" }));
     expect(p.onCreate).toHaveBeenCalledWith("Plan sprint", 4);
+  });
+
+  it("keeps the new todo form when the parent reports failure", async () => {
+    const p = props();
+    p.onCreate.mockResolvedValue(false);
+    const { getByLabelText, getByRole } = render(TodoList, { props: p });
+    const title = getByLabelText("New todo title") as HTMLInputElement;
+    const estimate = getByLabelText("Estimate (pomodoros)") as HTMLInputElement;
+
+    await fireEvent.input(title, { target: { value: "Keep me" } });
+    await fireEvent.input(estimate, { target: { value: "2" } });
+    await fireEvent.click(getByRole("button", { name: "Add todo" }));
+
+    await waitFor(() => expect(p.onCreate).toHaveBeenCalledOnce());
+    expect(title.value).toBe("Keep me");
+    expect(estimate.value).toBe("2");
+  });
+
+  it("clears the new todo form when the parent reports success", async () => {
+    const p = props();
+    p.onCreate.mockResolvedValue(true);
+    const { getByLabelText, getByRole } = render(TodoList, { props: p });
+    const title = getByLabelText("New todo title") as HTMLInputElement;
+
+    await fireEvent.input(title, { target: { value: "Done" } });
+    await fireEvent.click(getByRole("button", { name: "Add todo" }));
+
+    await waitFor(() => expect(p.onCreate).toHaveBeenCalledOnce());
+    expect(title.value).toBe("");
   });
 
   it("blocks a zero estimate", async () => {
@@ -176,6 +205,22 @@ describe("TodoList", () => {
     expect(p.onUpdate).toHaveBeenCalledWith("a", "A", null);
   });
 
+  it("keeps the edit form and draft when saving fails", async () => {
+    const p = props([todo({ id: "a", title: "A" })]);
+    p.onUpdate.mockResolvedValue(false);
+    const { getByLabelText, getByRole, queryByRole } = render(TodoList, { props: p });
+    await fireEvent.click(getByRole("button", { name: "Edit A" }));
+    const title = getByLabelText("Edit todo title") as HTMLInputElement;
+    await fireEvent.input(title, { target: { value: "Updated" } });
+
+    await fireEvent.click(getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(p.onUpdate).toHaveBeenCalledOnce());
+    expect(getByLabelText("Edit todo title")).toBeTruthy();
+    expect(title.value).toBe("Updated");
+    expect(queryByRole("button", { name: "Edit A" })).toBeNull();
+  });
+
   it("blocks an invalid estimate while editing", async () => {
     const p = props([todo({ id: "a", title: "A" })]);
     const { getByLabelText, getByRole } = render(TodoList, { props: p });
@@ -192,6 +237,18 @@ describe("TodoList", () => {
     const { getByLabelText } = render(TodoList, { props: p });
     await fireEvent.click(getByLabelText("Mark A complete"));
     expect(p.onToggle).toHaveBeenCalledWith("a", true);
+  });
+
+  it("restores the completion checkbox when the toggle fails", async () => {
+    const p = props([todo({ id: "a", title: "A" })]);
+    p.onToggle.mockResolvedValue(false);
+    const { getByLabelText } = render(TodoList, { props: p });
+    const checkbox = getByLabelText("Mark A complete") as HTMLInputElement;
+
+    await fireEvent.click(checkbox);
+
+    await waitFor(() => expect(p.onToggle).toHaveBeenCalledOnce());
+    expect(checkbox.checked).toBe(false);
   });
 
   it("uncompletes a completed todo from the checkbox", async () => {
@@ -237,5 +294,11 @@ describe("TodoList", () => {
     const p = props([todo({ id: "a", title: "A", estimatePomodoros: 5, completedPomodoros: 2 })]);
     const { getByText } = render(TodoList, { props: p });
     expect(getByText("2 / 5")).toBeTruthy();
+  });
+
+  it("describes estimate progress for assistive technology", () => {
+    const p = props([todo({ id: "a", title: "A", estimatePomodoros: 5, completedPomodoros: 2 })]);
+    const { getByText } = render(TodoList, { props: p });
+    expect(getByText("2 completed pomodoros of 5 estimated")).toBeTruthy();
   });
 });

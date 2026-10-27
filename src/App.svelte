@@ -102,8 +102,10 @@
       await commands.createTodo(title, estimate);
       commandError = null;
       await refresh();
+      return true;
     } catch (error) {
       showCommandError(error);
+      return false;
     }
   }
 
@@ -112,8 +114,10 @@
       await commands.updateTodo(id, title, estimate);
       commandError = null;
       await refresh();
+      return true;
     } catch (error) {
       showCommandError(error);
+      return false;
     }
   }
 
@@ -122,8 +126,10 @@
       await commands.setTodoCompleted(id, completed);
       commandError = null;
       await refresh();
+      return true;
     } catch (error) {
       showCommandError(error);
+      return false;
     }
   }
 
@@ -176,8 +182,24 @@
     void runTimerCommand(() => commands.resumeTimer());
   }
 
-  function endFocus() {
-    void runTimerCommand(() => commands.endFocus());
+  async function endFocus() {
+    if (timer?.state !== "focusRunning" && timer?.state !== "focusPaused") return;
+
+    try {
+      const confirmed = await confirm(
+        "End this focus session? Your focused time will be saved, but it will not count as a completed pomodoro.",
+        {
+          title: "End focus?",
+          kind: "warning",
+          okLabel: "End focus",
+          cancelLabel: "Keep focusing",
+        },
+      );
+      if (!confirmed) return;
+      await runTimerCommand(() => commands.endFocus());
+    } catch (error) {
+      showCommandError(error);
+    }
   }
 
   function startBreak() {

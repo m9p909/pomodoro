@@ -50,7 +50,12 @@
         <span class="compact-phase">{phaseLabel(timer)}</span>
         <span class="compact-time">{formatTimer(timer.remainingMs)}</span>
         {#if timer.persistenceWarning}
-          <span class="warning-dot" title="Saving is delayed"></span>
+          <span
+            class="warning-dot"
+            role="img"
+            aria-label="Saving is delayed"
+            title="Saving is delayed"
+          ></span>
         {/if}
       </div>
       <button

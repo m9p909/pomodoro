@@ -8,8 +8,12 @@
     canMoveUp?: boolean;
     canMoveDown?: boolean;
     onPlay?: (id: string) => void;
-    onUpdate?: (id: string, title: string, estimate: number | null) => void;
-    onToggle?: (id: string, completed: boolean) => void;
+    onUpdate?: (
+      id: string,
+      title: string,
+      estimate: number | null,
+    ) => boolean | void | Promise<boolean | void>;
+    onToggle?: (id: string, completed: boolean) => boolean | void | Promise<boolean | void>;
     onDelete?: (id: string) => void;
     onMoveUp?: () => void;
     onMoveDown?: () => void;
@@ -74,7 +78,7 @@
     return estimate;
   }
 
-  function saveEdit(event: SubmitEvent) {
+  async function saveEdit(event: SubmitEvent) {
     event.preventDefault();
     const title = draftTitle.trim();
     if (!title) {
@@ -90,13 +94,18 @@
       return;
     }
 
-    onUpdate(todo.id, title, estimate);
+    const succeeded = await onUpdate(todo.id, title, estimate);
+    if (succeeded === false) return;
     editing = false;
     editError = null;
   }
 
-  function handleToggle(event: Event) {
-    onToggle(todo.id, (event.currentTarget as HTMLInputElement).checked);
+  async function handleToggle(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const succeeded = await onToggle(todo.id, input.checked);
+    if (succeeded === false) {
+      input.checked = completed;
+    }
   }
 </script>
 
@@ -152,13 +161,13 @@
   {:else}
     <div class="todo-main">
       <span class="todo-title">{todo.title}</span>
-      <span
-        class="todo-progress"
-        aria-label={`${todo.completedPomodoros} completed pomodoros${
-          todo.estimatePomodoros == null ? "" : ` of ${todo.estimatePomodoros} estimated`
-        }`}
-      >
-        {progressLabel}
+      <span class="todo-progress">
+        <span aria-hidden="true">{progressLabel}</span>
+        <span class="sr-only">
+          {todo.completedPomodoros} completed pomodoros{todo.estimatePomodoros == null
+            ? ""
+            : ` of ${todo.estimatePomodoros} estimated`}
+        </span>
       </span>
     </div>
 
