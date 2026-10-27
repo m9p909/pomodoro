@@ -16,6 +16,7 @@
     onTimerSnapshot,
   } from "./lib/api";
   import Header from "./lib/components/Header.svelte";
+  import Insights from "./lib/components/Insights.svelte";
   import TimerCard from "./lib/components/TimerCard.svelte";
   import TodoList from "./lib/components/TodoList.svelte";
 
@@ -356,25 +357,13 @@
         />
       </div>
     {:else}
-      <section class="panel placeholder-panel insights-placeholder" aria-labelledby="insights-placeholder-title">
-        <div class="placeholder-heading">
-          <p class="eyebrow">Insights</p>
-          <span class="placeholder-tag">Placeholder · Task 11</span>
+      {#if analytics}
+        <Insights {analytics} />
+      {:else}
+        <div class="center-state">
+          <p>Analytics are not available yet.</p>
         </div>
-        <h2 id="insights-placeholder-title">See where your focus went</h2>
-        <p>
-          Daily totals and the rolling seven-day matrix will render here from Rust analytics.
-        </p>
-        <div class="placeholder-outline insights-outline" aria-hidden="true">
-          <span class="placeholder-line wide"></span>
-          <span class="placeholder-line"></span>
-          <span class="placeholder-line"></span>
-          <span class="placeholder-line short"></span>
-        </div>
-        <p class="placeholder-footnote">
-          {analytics ? "Analytics are loaded and ready to render." : "No analytics loaded yet."}
-        </p>
-      </section>
+      {/if}
     {/if}
   </main>
 </div>
@@ -405,30 +394,6 @@
     margin: 0 auto;
   }
 
-  .panel {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--surface);
-    box-shadow: var(--shadow-sm);
-    padding: 1.5rem;
-  }
-
-  .placeholder-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    border-style: dashed;
-    background: color-mix(in srgb, var(--surface) 72%, transparent);
-    box-shadow: none;
-  }
-
-  .placeholder-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-
   .eyebrow {
     margin: 0;
     color: var(--text-faint);
@@ -436,69 +401,6 @@
     font-weight: 700;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-  }
-
-  .placeholder-tag {
-    border: 1px dashed var(--border-strong);
-    border-radius: 999px;
-    color: var(--text-faint);
-    font-size: 0.68rem;
-    font-weight: 600;
-    padding: 0.2rem 0.55rem;
-    white-space: nowrap;
-  }
-
-  .placeholder-panel h2 {
-    margin: 0;
-    font-size: 1.2rem;
-    letter-spacing: -0.01em;
-  }
-
-  .placeholder-panel p {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: 0.86rem;
-    line-height: 1.55;
-  }
-
-  .placeholder-outline {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    margin-top: 0.5rem;
-    border: 1px dashed var(--border);
-    border-radius: var(--radius-md);
-    padding: 1rem;
-  }
-
-  .placeholder-line {
-    height: 0.55rem;
-    width: 72%;
-    border-radius: 999px;
-    background: var(--surface-muted);
-  }
-
-  .placeholder-line.wide {
-    width: 92%;
-  }
-
-  .placeholder-line.short {
-    width: 48%;
-  }
-
-  .insights-outline {
-    margin-top: 0.75rem;
-  }
-
-  .placeholder-footnote {
-    margin-top: auto;
-    color: var(--text-faint) !important;
-    font-size: 0.76rem !important;
-  }
-
-  .insights-placeholder {
-    max-width: 64rem;
-    margin: 0 auto;
   }
 
   .degraded-banner {

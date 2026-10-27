@@ -413,6 +413,16 @@ describe("App", () => {
     expect(getByText("Live updates degraded")).toBeTruthy();
   });
 
+  it("renders the insights dashboard on the insights tab", async () => {
+    const { getByRole, getByText, queryByText } = render(App);
+    await waitFor(() => expect(getByText("Start unassigned")).toBeTruthy());
+
+    await fireEvent.click(getByRole("button", { name: "Insights" }));
+
+    expect(getByText("No focus time yet")).toBeTruthy();
+    expect(queryByText("Start unassigned")).toBeNull();
+  });
+
   it("cleans up every listener on unmount", async () => {
     const { getByText, unmount } = render(App);
     await waitFor(() => expect(getByText("Start unassigned")).toBeTruthy());
