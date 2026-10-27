@@ -4,12 +4,90 @@
   box-sizing: border-box;
 }
 
+:root {
+  color-scheme: light dark;
+  --bg: #f7f5f2;
+  --bg-deep: #f0ede8;
+  --surface: #ffffff;
+  --surface-muted: #f1eee9;
+  --border: #e3ded7;
+  --border-strong: #cdc7bd;
+  --text: #252220;
+  --text-muted: #6f6961;
+  --text-faint: #968f85;
+  --accent-focus: #e05a3f;
+  --accent-focus-strong: #c8482f;
+  --accent-break: #2f9e8a;
+  --accent-break-strong: #238372;
+  --danger: #bf3d3d;
+  --warning: #d08a28;
+  --warning-text: #82540f;
+  --ring-track: #ece7e0;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --shadow-sm: 0 1px 2px rgb(45 35 25 / 6%);
+  --shadow-md: 0 16px 40px -24px rgb(45 35 25 / 24%);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #191817;
+    --bg-deep: #131211;
+    --surface: #201f1d;
+    --surface-muted: #292724;
+    --border: #35322e;
+    --border-strong: #4b4741;
+    --text: #f1ede7;
+    --text-muted: #aaa39a;
+    --text-faint: #837c73;
+    --accent-focus: #ef7055;
+    --accent-focus-strong: #ff8a70;
+    --accent-break: #45b8a1;
+    --accent-break-strong: #65cfb9;
+    --danger: #ef7a72;
+    --warning: #e6a948;
+    --warning-text: #f0c379;
+    --ring-track: #332f2b;
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 24%);
+    --shadow-md: 0 20px 48px -20px rgb(0 0 0 / 55%);
+  }
+}
+
 html,
-body {
+body,
+#app {
   height: 100%;
 }
 
 body {
   margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent-focus);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent-focus) 24%, transparent);
 }
