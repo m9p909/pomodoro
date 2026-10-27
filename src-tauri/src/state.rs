@@ -72,7 +72,7 @@ impl AppInner {
         todos::set_completed(&self.conn, id, completed, self.clock.utc_ms())
     }
 
-    pub fn delete_todo(&mut self, id: &str) -> Result<(), AppError> {
+    pub fn delete_todo(&mut self, id: &str) -> Result<TimerSnapshot, AppError> {
         let attributed = self
             .timer
             .snapshot(&self.conn)?
@@ -82,7 +82,8 @@ impl AppInner {
         if attributed {
             self.timer.end_focus(&mut self.conn, self.clock.utc_ms())?;
         }
-        todos::soft_delete(&self.conn, id, self.clock.utc_ms())
+        todos::soft_delete(&self.conn, id, self.clock.utc_ms())?;
+        self.timer.snapshot(&self.conn)
     }
 
     pub fn reorder_todos(&mut self, ids: &[String]) -> Result<Vec<Todo>, AppError> {
@@ -200,6 +201,18 @@ mod tests {
             .query_row("SELECT outcome FROM focus_sessions", [], |r| r.get(0))
             .unwrap();
         assert_eq!(outcome, "abandoned");
+    }
+
+    #[test]
+    fn deleting_active_todo_returns_idle_snapshot() {
+        let (mut inner, _clock) = test_inner();
+        let todo = inner.create_todo("Task", Some(1)).unwrap();
+        inner.start_focus(Some(todo.id.clone())).unwrap();
+
+        let snapshot = inner.delete_todo(&todo.id).unwrap();
+
+        assert_eq!(snapshot.state, TimerState::Idle);
+        assert_eq!(snapshot.attributed_todo_id, None);
     }
 
     #[test]

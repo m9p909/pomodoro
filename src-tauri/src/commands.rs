@@ -96,13 +96,12 @@ pub fn set_todo_completed(
 
 #[tauri::command]
 #[specta::specta]
-pub fn delete_todo(state: State<'_, AppState>, id: String) -> Result<(), AppError> {
-    {
+pub fn delete_todo(state: State<'_, AppState>, id: String) -> Result<TimerSnapshot, AppError> {
+    let snapshot = {
         let mut inner = lock_inner(state.inner())?;
-        inner.delete_todo(&id)?;
-    }
-    emit_data_changed(&state.app);
-    Ok(())
+        inner.delete_todo(&id)?
+    };
+    Ok(timer_update(&state.app, snapshot))
 }
 
 #[tauri::command]
