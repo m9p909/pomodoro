@@ -24,45 +24,65 @@
   let timer = $state<TimerSnapshot | null>(null);
   let analytics = $state<AnalyticsSnapshot | null>(null);
   let tab = $state<Tab>("focus");
-  let errorMessage = $state<string | null>(null);
+  let fatalError = $state<string | null>(null);
+  let commandError = $state<string | null>(null);
+  let listenerErrors = $state<string[]>([]);
   let loading = $state(true);
 
   let chime: HTMLAudioElement | null = null;
+  let timerEventReceived = false;
+  let dataEventReceived = false;
+  let refreshRevision = 0;
 
-  function showError(error: unknown) {
-    errorMessage = formatError(error);
+  function showCommandError(error: unknown) {
+    commandError = formatError(error);
+  }
+
+  function addListenerError(error: unknown) {
+    const message = formatError(error);
+    if (!listenerErrors.includes(message)) {
+      listenerErrors = [...listenerErrors, message];
+    }
   }
 
   async function bootstrap() {
     loading = true;
     try {
       const data = await commands.bootstrap();
-      todos = data.todos;
-      timer = data.timer;
-      analytics = data.analytics;
-      errorMessage = null;
+      if (!timerEventReceived) {
+        timer = data.timer;
+      }
+      if (!dataEventReceived) {
+        todos = data.todos;
+        analytics = data.analytics;
+      }
+      fatalError = null;
     } catch (error) {
-      showError(error);
+      fatalError = formatError(error);
     } finally {
       loading = false;
     }
   }
 
   async function refresh() {
+    const revision = ++refreshRevision;
     try {
       const data = await commands.refreshData();
+      if (revision !== refreshRevision) return;
       todos = data.todos;
       analytics = data.analytics;
     } catch (error) {
-      showError(error);
+      if (revision !== refreshRevision) return;
+      showCommandError(error);
     }
   }
 
   async function runTimerCommand(command: () => Promise<TimerSnapshot>) {
     try {
       timer = await command();
+      commandError = null;
     } catch (error) {
-      showError(error);
+      showCommandError(error);
     }
   }
 
@@ -113,25 +133,27 @@
       timer?.state === "breakRunning" ||
       timer?.state === "breakPaused";
     const hasWarning = Boolean(timer?.persistenceWarning);
-    if (!active && !hasWarning) return;
+    if (timer && !active && !hasWarning) return;
 
     event.preventDefault();
 
     try {
-      const confirmed = await confirm(
-        hasWarning
+      const message = !timer
+        ? fatalError
+          ? "Pomodoro could not start. Close the app anyway?"
+          : "Pomodoro is still starting. Close anyway?"
+        : hasWarning
           ? "Some focus time has not been saved yet. Closing now may lose that progress."
-          : "A focus or break session is still in progress. Close Pomodoro and save your progress?",
-        {
-          title: "Close Pomodoro?",
-          kind: "warning",
-          okLabel: "Close",
-          cancelLabel: "Keep working",
-        },
-      );
+          : "A focus or break session is still in progress. Close Pomodoro and save your progress?";
+      const confirmed = await confirm(message, {
+        title: "Close Pomodoro?",
+        kind: "warning",
+        okLabel: "Close",
+        cancelLabel: "Keep working",
+      });
       if (confirmed) await commands.closeApp();
     } catch (error) {
-      showError(error);
+      showCommandError(error);
     }
   }
 
@@ -142,13 +164,15 @@
     void (async () => {
       const registrations = await Promise.allSettled([
         onTimerSnapshot((snapshot) => {
+          timerEventReceived = true;
           timer = snapshot;
         }),
         onDataChanged(() => {
+          dataEventReceived = true;
           void refresh();
         }),
         onTimerAlert((alert) => {
-          if (alert.audible && !timer?.muted) playChime();
+          if (alert.audible) playChime();
         }),
       ]);
 
@@ -160,7 +184,7 @@
             unlisteners.push(registration.value);
           }
         } else {
-          showError(registration.reason);
+          addListenerError(registration.reason);
         }
       }
 
@@ -176,7 +200,7 @@
           unlisteners.push(unlisten);
         }
       } catch (error) {
-        showError(error);
+        addListenerError(error);
       }
     })();
 
@@ -191,10 +215,17 @@
   <Header tab={tab} {timer} onTab={(next) => (tab = next)} onToggleMute={toggleMute} />
 
   <main class="app-main">
-    {#if errorMessage}
+    {#if listenerErrors.length > 0}
+      <div class="degraded-banner" role="status">
+        <strong>Live updates degraded</strong>
+        <span>{listenerErrors.join(" ")}</span>
+      </div>
+    {/if}
+
+    {#if commandError}
       <div class="toast" role="alert">
-        <span>{errorMessage}</span>
-        <button type="button" class="toast-dismiss" onclick={() => (errorMessage = null)}>
+        <span>{commandError}</span>
+        <button type="button" class="toast-dismiss" onclick={() => (commandError = null)}>
           Dismiss
         </button>
       </div>
@@ -205,11 +236,20 @@
         <span class="spinner" aria-hidden="true"></span>
         <p>Loading your day…</p>
       </div>
+    {:else if fatalError}
+      <div class="center-state fatal-state">
+        <p class="eyebrow">Startup problem</p>
+        <h1>Pomodoro could not start</h1>
+        <p class="fatal-message">{fatalError}</p>
+        <button type="button" class="retry-button" onclick={() => void bootstrap()}>
+          Try again
+        </button>
+      </div>
     {:else if !timer}
       <div class="center-state fatal-state">
         <p class="eyebrow">Startup problem</p>
         <h1>Pomodoro could not start</h1>
-        <p class="fatal-message">{errorMessage ?? "The app data could not be loaded."}</p>
+        <p class="fatal-message">The app data could not be loaded.</p>
         <button type="button" class="retry-button" onclick={() => void bootstrap()}>
           Try again
         </button>
@@ -391,6 +431,28 @@
   .insights-placeholder {
     max-width: 64rem;
     margin: 0 auto;
+  }
+
+  .degraded-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem 0.6rem;
+    max-width: 64rem;
+    margin: 0 auto 1rem;
+    border: 1px solid color-mix(in srgb, var(--warning) 42%, var(--border));
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--warning) 11%, var(--surface));
+    color: var(--warning-text);
+    font-size: 0.82rem;
+    line-height: 1.45;
+    padding: 0.7rem 0.9rem;
+  }
+
+  .degraded-banner strong {
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
 
   .center-state {
