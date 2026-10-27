@@ -7,6 +7,7 @@ import type {
   DataSnapshot,
   TimerAlert,
   TimerSnapshot,
+  Todo,
 } from "./lib/bindings";
 
 const state = vi.hoisted(() => {
@@ -28,6 +29,11 @@ const state = vi.hoisted(() => {
     skipBreak: vi.fn(),
     setMuted: vi.fn(),
     closeApp: vi.fn(),
+    createTodo: vi.fn(),
+    updateTodo: vi.fn(),
+    setTodoCompleted: vi.fn(),
+    deleteTodo: vi.fn(),
+    reorderTodos: vi.fn(),
     confirm: vi.fn(),
     play: vi.fn(() => Promise.resolve()),
   };
@@ -76,6 +82,11 @@ vi.mock("./lib/bindings", () => ({
     skipBreak: state.skipBreak,
     setMuted: state.setMuted,
     closeApp: state.closeApp,
+    createTodo: state.createTodo,
+    updateTodo: state.updateTodo,
+    setTodoCompleted: state.setTodoCompleted,
+    deleteTodo: state.deleteTodo,
+    reorderTodos: state.reorderTodos,
   },
 }));
 
@@ -97,13 +108,25 @@ const timerSnapshot = (overrides: Partial<TimerSnapshot> = {}): TimerSnapshot =>
   ...overrides,
 });
 
+const todo = (overrides: Partial<Todo> = {}): Todo => ({
+  id: "a",
+  title: "Write tests",
+  estimatePomodoros: 3,
+  sortOrder: 0,
+  completedAt: null,
+  createdAt: 0,
+  updatedAt: 0,
+  completedPomodoros: 0,
+  ...overrides,
+});
+
 const analytics: AnalyticsSnapshot = {
   today: { date: "2026-10-26", totalMs: 0, rows: [] },
   week: { days: [], rows: [], dayTotals: [], totalMs: 0 },
 };
 
-const bootstrapData = (timer: TimerSnapshot = timerSnapshot()): Bootstrap => ({
-  todos: [],
+const bootstrapData = (timer: TimerSnapshot = timerSnapshot(), todos: Todo[] = []): Bootstrap => ({
+  todos,
   timer,
   analytics,
 });
@@ -151,6 +174,11 @@ describe("App", () => {
     state.skipBreak.mockResolvedValue(timerSnapshot());
     state.setMuted.mockResolvedValue(timerSnapshot());
     state.closeApp.mockResolvedValue(null);
+    state.createTodo.mockResolvedValue(todo());
+    state.updateTodo.mockResolvedValue(todo());
+    state.setTodoCompleted.mockResolvedValue(todo());
+    state.deleteTodo.mockResolvedValue(timerSnapshot());
+    state.reorderTodos.mockResolvedValue([]);
     state.confirm.mockResolvedValue(false);
     vi.stubGlobal("Audio", AudioMock);
   });
@@ -231,6 +259,46 @@ describe("App", () => {
 
     pending.resolve(bootstrapData());
     await waitFor(() => expect(getByText("Start unassigned")).toBeTruthy());
+  });
+
+  it("asks for confirmation before deleting a todo", async () => {
+    state.bootstrap.mockResolvedValue(
+      bootstrapData(timerSnapshot(), [todo({ id: "a", title: "A" })]),
+    );
+    const { getByRole } = render(App);
+    await waitFor(() => expect(getByRole("button", { name: "Delete A" })).toBeTruthy());
+
+    await fireEvent.click(getByRole("button", { name: "Delete A" }));
+
+    await waitFor(() => expect(state.confirm).toHaveBeenCalledOnce());
+    expect(state.deleteTodo).not.toHaveBeenCalled();
+  });
+
+  it("deletes a todo and refreshes after confirmation", async () => {
+    state.bootstrap.mockResolvedValue(
+      bootstrapData(timerSnapshot(), [todo({ id: "a", title: "A" })]),
+    );
+    state.confirm.mockResolvedValue(true);
+    const { getByRole } = render(App);
+    await waitFor(() => expect(getByRole("button", { name: "Delete A" })).toBeTruthy());
+
+    await fireEvent.click(getByRole("button", { name: "Delete A" }));
+
+    await waitFor(() => expect(state.deleteTodo).toHaveBeenCalledWith("a"));
+    await waitFor(() => expect(state.refreshData).toHaveBeenCalled());
+  });
+
+  it("creates a todo and refreshes", async () => {
+    const { getByLabelText, getByRole } = render(App);
+    await waitFor(() => expect(getByLabelText("New todo title")).toBeTruthy());
+
+    await fireEvent.input(getByLabelText("New todo title"), {
+      target: { value: "  New task  " },
+    });
+    await fireEvent.click(getByRole("button", { name: "Add todo" }));
+
+    await waitFor(() => expect(state.createTodo).toHaveBeenCalledWith("New task", null));
+    await waitFor(() => expect(state.refreshData).toHaveBeenCalled());
   });
 
   it("keeps a newer timer snapshot that arrives while bootstrap is resolving", async () => {

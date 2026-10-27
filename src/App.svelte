@@ -17,6 +17,7 @@
   } from "./lib/api";
   import Header from "./lib/components/Header.svelte";
   import TimerCard from "./lib/components/TimerCard.svelte";
+  import TodoList from "./lib/components/TodoList.svelte";
 
   type Tab = "focus" | "insights";
 
@@ -33,6 +34,15 @@
   let timerEventReceived = false;
   let dataEventReceived = false;
   let refreshRevision = 0;
+
+  let activeTodoId = $derived(
+    timer && (timer.state === "focusRunning" || timer.state === "focusPaused")
+      ? (timer.attributedTodoId ?? null)
+      : null,
+  );
+  let breakActive = $derived(
+    timer?.phase === "shortBreak" || timer?.phase === "longBreak",
+  );
 
   function showCommandError(error: unknown) {
     commandError = formatError(error);
@@ -81,6 +91,68 @@
     try {
       timer = await command();
       commandError = null;
+    } catch (error) {
+      showCommandError(error);
+    }
+  }
+
+  async function createTodo(title: string, estimate: number | null) {
+    try {
+      await commands.createTodo(title, estimate);
+      await refresh();
+    } catch (error) {
+      showCommandError(error);
+    }
+  }
+
+  async function updateTodo(id: string, title: string, estimate: number | null) {
+    try {
+      await commands.updateTodo(id, title, estimate);
+      await refresh();
+    } catch (error) {
+      showCommandError(error);
+    }
+  }
+
+  async function toggleTodo(id: string, completed: boolean) {
+    try {
+      await commands.setTodoCompleted(id, completed);
+      await refresh();
+    } catch (error) {
+      showCommandError(error);
+    }
+  }
+
+  async function deleteTodo(id: string) {
+    const target = todos.find((todo) => todo.id === id);
+    try {
+      const confirmed = await confirm(
+        target
+          ? `Delete "${target.title}"? This cannot be undone.`
+          : "Delete this todo? This cannot be undone.",
+        {
+          title: "Delete todo?",
+          kind: "warning",
+          okLabel: "Delete",
+          cancelLabel: "Cancel",
+        },
+      );
+      if (!confirmed) return;
+      await commands.deleteTodo(id);
+      await refresh();
+    } catch (error) {
+      showCommandError(error);
+    }
+  }
+
+  async function reorderTodos(ids: string[]) {
+    const completedIds = todos
+      .filter((todo) => todo.completedAt != null)
+      .sort((left, right) => left.sortOrder - right.sortOrder)
+      .map((todo) => todo.id);
+    try {
+      await commands.reorderTodos([...ids, ...completedIds]);
+      await refresh();
     } catch (error) {
       showCommandError(error);
     }
@@ -266,26 +338,17 @@
           onSkipBreak={skipBreak}
         />
 
-        <section class="panel placeholder-panel" aria-labelledby="todo-placeholder-title">
-          <div class="placeholder-heading">
-            <p class="eyebrow">Todo list</p>
-            <span class="placeholder-tag">Placeholder · Task 10</span>
-          </div>
-          <h2 id="todo-placeholder-title">Plan the work</h2>
-          <p>
-            The interactive todo list lands here next: add tasks, set estimates, and start focus
-            from any row.
-          </p>
-          <div class="placeholder-outline" aria-hidden="true">
-            <span class="placeholder-line wide"></span>
-            <span class="placeholder-line"></span>
-            <span class="placeholder-line short"></span>
-          </div>
-          <p class="placeholder-footnote">
-            {todos.length}
-            {todos.length === 1 ? "todo" : "todos"} currently loaded from Rust.
-          </p>
-        </section>
+        <TodoList
+          {todos}
+          {activeTodoId}
+          {breakActive}
+          onPlay={startFocus}
+          onCreate={createTodo}
+          onUpdate={updateTodo}
+          onToggle={toggleTodo}
+          onDelete={deleteTodo}
+          onReorder={reorderTodos}
+        />
       </div>
     {:else}
       <section class="panel placeholder-panel insights-placeholder" aria-labelledby="insights-placeholder-title">
