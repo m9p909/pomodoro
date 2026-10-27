@@ -91,7 +91,7 @@ jobs:
         include:
           - platform: ubuntu-22.04
             args: --bundles appimage,deb
-          - platform: windows-latest
+          - platform: windows-2022
             args: --bundles msi
           - platform: macos-14
             args: --target universal-apple-darwin --bundles dmg
