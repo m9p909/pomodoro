@@ -529,6 +529,71 @@ describe("App", () => {
     await waitFor(() => expect(getByText("Start unassigned")).toBeTruthy());
   });
 
+  it.each(["breakRunning", "breakPaused"] as const)(
+    "disables todo play during a %s break",
+    async (timerState) => {
+      state.bootstrap.mockResolvedValue(
+        bootstrapData(
+          timerSnapshot({
+            state: timerState,
+            phase: "shortBreak",
+            remainingMs: 300_000,
+            totalMs: 300_000,
+          }),
+          [todo({ id: "a", title: "A" })],
+        ),
+      );
+      const { getByRole } = render(App);
+      const play = (await waitFor(() =>
+        getByRole("button", { name: "Play A" }),
+      )) as HTMLButtonElement;
+
+      expect(play.hasAttribute("disabled")).toBe(true);
+    },
+  );
+
+  it("plays a todo during a pending break and starts focus", async () => {
+    state.bootstrap.mockResolvedValue(
+      bootstrapData(
+        timerSnapshot({
+          state: "breakPending",
+          phase: "shortBreak",
+          remainingMs: 300_000,
+          totalMs: 300_000,
+        }),
+        [todo({ id: "a", title: "A" })],
+      ),
+    );
+    const { getByRole } = render(App);
+    const play = (await waitFor(() =>
+      getByRole("button", { name: "Play A" }),
+    )) as HTMLButtonElement;
+
+    expect(play.hasAttribute("disabled")).toBe(false);
+    await fireEvent.click(play);
+
+    await waitFor(() => expect(state.startFocus).toHaveBeenCalledWith("a"));
+  });
+
+  it("starts unassigned focus during a pending break", async () => {
+    state.bootstrap.mockResolvedValue(
+      bootstrapData(
+        timerSnapshot({
+          state: "breakPending",
+          phase: "shortBreak",
+          remainingMs: 300_000,
+          totalMs: 300_000,
+        }),
+      ),
+    );
+    const { getByText } = render(App);
+    await waitFor(() => expect(getByText("Start unassigned")).toBeTruthy());
+
+    await fireEvent.click(getByText("Start unassigned"));
+
+    await waitFor(() => expect(state.startFocus).toHaveBeenCalledWith(null));
+  });
+
   it("renders the insights dashboard on the insights tab", async () => {
     const { getByRole, getByText, queryByText } = render(App);
     await waitFor(() => expect(getByText("Start unassigned")).toBeTruthy());

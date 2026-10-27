@@ -42,7 +42,7 @@
       : null,
   );
   let breakActive = $derived(
-    timer?.phase === "shortBreak" || timer?.phase === "longBreak",
+    timer?.state === "breakRunning" || timer?.state === "breakPaused",
   );
 
   function showCommandError(error: unknown) {

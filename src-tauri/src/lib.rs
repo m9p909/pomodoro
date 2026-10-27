@@ -8,10 +8,13 @@ mod repo;
 mod state;
 mod timer;
 
+use std::fmt::Display;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tauri::{Emitter, Manager};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 
 use crate::clock::SystemClock;
@@ -43,11 +46,36 @@ pub fn run() {
                 )?;
             }
 
-            let data_dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&data_dir)?;
+            let data_dir = match app.path().app_data_dir() {
+                Ok(data_dir) => data_dir,
+                Err(error) => {
+                    show_startup_failure(
+                        app.handle(),
+                        Path::new("<app data directory unavailable>"),
+                        &error,
+                    );
+                    return Ok(());
+                }
+            };
             let db_path = data_dir.join("pomodoro.sqlite");
-            let conn = db::open(&db_path)?;
-            let inner = AppInner::new(conn, Arc::new(SystemClock::new()))?;
+            if let Err(error) = std::fs::create_dir_all(&data_dir) {
+                show_startup_failure(app.handle(), &db_path, &error);
+                return Ok(());
+            }
+            let conn = match db::open(&db_path) {
+                Ok(conn) => conn,
+                Err(error) => {
+                    show_startup_failure(app.handle(), &db_path, &error);
+                    return Ok(());
+                }
+            };
+            let inner = match AppInner::new(conn, Arc::new(SystemClock::new())) {
+                Ok(inner) => inner,
+                Err(error) => {
+                    show_startup_failure(app.handle(), &db_path, &error);
+                    return Ok(());
+                }
+            };
             app.manage(AppState {
                 inner: Arc::new(Mutex::new(inner)),
                 app: app.handle().clone(),
@@ -71,6 +99,26 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
+}
+
+fn startup_error_message(db_path: &Path, error: &dyn Display) -> String {
+    format!(
+        "Pomodoro could not open its local database.\n\nDatabase: {}\n\nError: {error}",
+        db_path.display()
+    )
+}
+
+fn show_startup_failure(app: &tauri::AppHandle, db_path: &Path, error: &dyn Display) {
+    log::error!("startup failed: {error}");
+    let handle = app.clone();
+    app.dialog()
+        .message(startup_error_message(db_path, error))
+        .title("Pomodoro could not start")
+        .kind(MessageDialogKind::Error)
+        .buttons(MessageDialogButtons::Ok)
+        .show(move |_| {
+            handle.exit(1);
+        });
 }
 
 fn tick_loop(app: tauri::AppHandle) {
@@ -132,5 +180,21 @@ fn notification_permission_granted(app: &tauri::AppHandle) -> bool {
             log::warn!("failed to read notification permission: {error}");
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::AppError;
+    use std::path::Path;
+
+    #[test]
+    fn startup_error_message_includes_database_path_and_error() {
+        let path = Path::new("/tmp/example/pomodoro.sqlite");
+        let message = startup_error_message(path, &AppError::Storage("disk full".to_string()));
+
+        assert!(message.contains("/tmp/example/pomodoro.sqlite"));
+        assert!(message.contains("disk full"));
     }
 }

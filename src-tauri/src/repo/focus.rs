@@ -23,15 +23,15 @@ pub fn finish_session(
     id: &str,
     outcome: &str,
     ended_at: i64,
-) -> Result<(), AppError> {
-    conn.execute(
+) -> Result<usize, AppError> {
+    let changed = conn.execute(
         "UPDATE focus_sessions
          SET outcome = ?2, ended_at = ?3, last_checkpoint_at = ?3
          WHERE id = ?1",
         params![id, outcome, ended_at],
     )?;
 
-    Ok(())
+    Ok(changed)
 }
 
 pub fn upsert_focus_time_tx(

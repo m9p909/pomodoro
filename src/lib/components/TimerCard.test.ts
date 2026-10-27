@@ -94,6 +94,23 @@ describe("TimerCard", () => {
     expect(onSkipBreak).toHaveBeenCalledOnce();
   });
 
+  it("offers unassigned focus while a break is pending", async () => {
+    const onStartUnassigned = vi.fn();
+    const { getByText } = render(TimerCard, {
+      timer: snapshot({
+        state: "breakPending",
+        phase: "shortBreak",
+        remainingMs: 300_000,
+        totalMs: 300_000,
+      }),
+      onStartUnassigned,
+    } as never);
+
+    await fireEvent.click(getByText("Start unassigned"));
+
+    expect(onStartUnassigned).toHaveBeenCalledOnce();
+  });
+
   it("shows pause and skip controls while a break is running", async () => {
     const onPause = vi.fn();
     const onSkipBreak = vi.fn();

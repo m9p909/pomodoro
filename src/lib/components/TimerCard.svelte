@@ -123,6 +123,9 @@
     {:else if timer.state === "breakPending"}
       <button type="button" class="btn primary break" onclick={onStartBreak}>Start break</button>
       <button type="button" class="btn secondary" onclick={onSkipBreak}>Skip break</button>
+      <button type="button" class="btn secondary" onclick={onStartUnassigned}>
+        Start unassigned
+      </button>
     {:else if timer.state === "breakRunning"}
       <button type="button" class="btn primary break" onclick={onPause}>Pause</button>
       <button type="button" class="btn secondary" onclick={onSkipBreak}>Skip break</button>

@@ -34,6 +34,12 @@ pub struct TickOutcome {
     pub data_changed: bool,
 }
 
+enum FocusAdvance {
+    Advanced,
+    SleepPaused,
+    Completed,
+}
+
 pub struct TimerCore {
     state: TimerState,
     phase: Option<TimerPhase>,
@@ -119,9 +125,16 @@ impl TimerCore {
                 }
 
                 if self.state == TimerState::FocusRunning {
-                    self.accrue_focus(self.delta(mono_ms), local_day);
+                    if matches!(
+                        self.advance_focus(conn, utc_ms, mono_ms, local_day)?,
+                        FocusAdvance::Completed
+                    ) {
+                        return self.start_focus(conn, todo_id, utc_ms, mono_ms, local_day);
+                    }
+                } else {
+                    let _ = self.flush_pending(conn, utc_ms);
                 }
-                let _ = self.flush_pending(conn, utc_ms);
+
                 if let Some(session_id) = self.session_id.as_deref() {
                     clear_credit(conn, session_id)?;
                 }
@@ -186,8 +199,12 @@ impl TimerCore {
         match self.state {
             TimerState::FocusRunning | TimerState::FocusPaused => {
                 let _ = self.flush_pending(conn, utc_ms);
-                if let Some(session_id) = self.session_id.clone() {
-                    finish_session(conn, &session_id, "abandoned", utc_ms)?;
+                if let Some(session_id) = self.session_id.clone()
+                    && finish_session(conn, &session_id, "abandoned", utc_ms)? != 1
+                {
+                    return Err(AppError::Storage(format!(
+                        "Focus session {session_id} could not be abandoned"
+                    )));
                 }
 
                 self.state = TimerState::Idle;
@@ -260,44 +277,43 @@ impl TimerCore {
         mono_ms: u64,
         local_day: &str,
     ) -> Result<TickOutcome, AppError> {
-        let _ = self.flush_pending(conn, utc_ms);
-
         let mut alert = None;
         let mut data_changed = false;
 
         match self.state {
             TimerState::FocusRunning => {
-                let delta = self.delta(mono_ms);
-                if delta > SLEEP_GAP_MS {
-                    let _ = self.flush_pending(conn, utc_ms);
-                    self.state = TimerState::FocusPaused;
-                    self.last_mono_ms = None;
-                    return Ok(TickOutcome {
-                        snapshot: self.snapshot(conn)?,
-                        alert: None,
-                        data_changed: true,
-                    });
+                match self.advance_focus(conn, utc_ms, mono_ms, local_day) {
+                    Ok(FocusAdvance::SleepPaused) => {
+                        return Ok(TickOutcome {
+                            snapshot: self.snapshot(conn)?,
+                            alert: None,
+                            data_changed: true,
+                        });
+                    }
+                    Ok(FocusAdvance::Completed) => {
+                        data_changed = true;
+                        alert = Some(self.focus_complete_alert());
+                    }
+                    Ok(FocusAdvance::Advanced) => {}
+                    Err(error) => {
+                        log::warn!("focus completion failed: {error}");
+                        data_changed = true;
+                    }
                 }
 
-                self.last_mono_ms = Some(mono_ms);
-                self.accrue_focus(delta, local_day);
-                let _ = self.flush_pending(conn, utc_ms);
-
-                if self.elapsed_ms - self.last_data_event_ms as i64 >= DATA_EVENT_INTERVAL_MS {
+                if self.state == TimerState::FocusRunning
+                    && self.elapsed_ms - self.last_data_event_ms as i64 >= DATA_EVENT_INTERVAL_MS
+                {
                     self.last_data_event_ms = self.elapsed_ms as u64;
                     data_changed = true;
                 }
-
-                if self.elapsed_ms >= FOCUS_MS {
-                    self.complete_focus(conn, utc_ms)?;
-                    data_changed = true;
-                    alert = Some(self.focus_complete_alert());
-                }
+            }
+            TimerState::FocusPaused => {
+                let _ = self.flush_pending(conn, utc_ms);
             }
             TimerState::BreakRunning => {
                 let delta = self.delta(mono_ms);
                 if delta > SLEEP_GAP_MS {
-                    let _ = self.flush_pending(conn, utc_ms);
                     self.state = TimerState::BreakPaused;
                     self.last_mono_ms = None;
                     return Ok(TickOutcome {
@@ -337,6 +353,39 @@ impl TimerCore {
         })
     }
 
+    fn advance_focus(
+        &mut self,
+        conn: &mut Connection,
+        utc_ms: i64,
+        mono_ms: u64,
+        local_day: &str,
+    ) -> Result<FocusAdvance, AppError> {
+        if self.elapsed_ms >= FOCUS_MS {
+            self.complete_focus(conn, utc_ms)?;
+            return Ok(FocusAdvance::Completed);
+        }
+
+        let delta = self.delta(mono_ms);
+        if delta > SLEEP_GAP_MS {
+            let flush_at = utc_ms.saturating_sub(delta as i64);
+            let _ = self.flush_pending(conn, flush_at);
+            self.state = TimerState::FocusPaused;
+            self.last_mono_ms = None;
+            return Ok(FocusAdvance::SleepPaused);
+        }
+
+        self.last_mono_ms = Some(mono_ms);
+        self.accrue_focus(delta, local_day);
+
+        if self.elapsed_ms >= FOCUS_MS {
+            self.complete_focus(conn, utc_ms)?;
+            return Ok(FocusAdvance::Completed);
+        }
+
+        let _ = self.flush_pending(conn, utc_ms);
+        Ok(FocusAdvance::Advanced)
+    }
+
     fn accrue_focus(&mut self, delta_ms: u64, local_day: &str) {
         let remaining = (FOCUS_MS - self.elapsed_ms).max(0);
         let credit_ms = (delta_ms as i64).min(remaining);
@@ -358,26 +407,60 @@ impl TimerCore {
     }
 
     fn complete_focus(&mut self, conn: &mut Connection, utc_ms: i64) -> Result<(), AppError> {
-        let _ = self.flush_pending(conn, utc_ms);
-        if let Some(session_id) = self.session_id.clone() {
-            finish_session(conn, &session_id, "completed", utc_ms)?;
-        }
+        let Some(session_id) = self.session_id.clone() else {
+            let error = AppError::Storage("No active focus session to complete".to_string());
+            self.persistence_warning = Some(PERSISTENCE_WARNING.to_string());
+            return Err(error);
+        };
 
-        let count = increment_completed_focus_count(conn)?;
-        self.completed_focus_count = count;
-        self.phase = Some(if count % 4 == 0 {
-            TimerPhase::LongBreak
-        } else {
-            TimerPhase::ShortBreak
-        });
-        self.state = TimerState::BreakPending;
-        self.elapsed_ms = 0;
-        self.session_id = None;
-        self.attributed_todo_id = None;
-        self.credit_todo_id = None;
-        self.last_mono_ms = None;
-        self.last_data_event_ms = 0;
-        Ok(())
+        let entries: Vec<(PendingKey, i64)> = self
+            .pending
+            .iter()
+            .map(|(key, delta)| (key.clone(), *delta))
+            .collect();
+
+        match Self::complete_focus_tx(conn, &session_id, &entries, utc_ms) {
+            Ok(count) => {
+                self.pending.clear();
+                self.persistence_warning = None;
+                self.completed_focus_count = count;
+                self.phase = Some(if count % 4 == 0 {
+                    TimerPhase::LongBreak
+                } else {
+                    TimerPhase::ShortBreak
+                });
+                self.state = TimerState::BreakPending;
+                self.elapsed_ms = 0;
+                self.session_id = None;
+                self.attributed_todo_id = None;
+                self.credit_todo_id = None;
+                self.last_mono_ms = None;
+                self.last_data_event_ms = 0;
+                Ok(())
+            }
+            Err(error) => {
+                self.persistence_warning = Some(PERSISTENCE_WARNING.to_string());
+                Err(error)
+            }
+        }
+    }
+
+    fn complete_focus_tx(
+        conn: &mut Connection,
+        session_id: &str,
+        entries: &[(PendingKey, i64)],
+        utc_ms: i64,
+    ) -> Result<i64, AppError> {
+        let tx = conn.transaction()?;
+        Self::upsert_pending_time(&tx, entries, utc_ms)?;
+        if finish_session(&tx, session_id, "completed", utc_ms)? != 1 {
+            return Err(AppError::Storage(format!(
+                "Focus session {session_id} could not be completed"
+            )));
+        }
+        let count = increment_completed_focus_count(&tx)?;
+        tx.commit()?;
+        Ok(count)
     }
 
     fn focus_complete_alert(&self) -> TimerAlert {
@@ -425,12 +508,30 @@ impl TimerCore {
         now: i64,
     ) -> Result<(), AppError> {
         let tx = conn.transaction()?;
-        let mut sessions = HashSet::new();
+        let sessions: HashSet<&str> = entries
+            .iter()
+            .map(|(key, _)| key.session_id.as_str())
+            .collect();
 
+        Self::upsert_pending_time(&tx, entries, now)?;
+
+        for session_id in sessions {
+            update_checkpoint(&tx, session_id, now)?;
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn upsert_pending_time(
+        conn: &Connection,
+        entries: &[(PendingKey, i64)],
+        now: i64,
+    ) -> Result<(), AppError> {
         for (key, delta) in entries {
             let bucket_key = key.todo_id.as_deref().unwrap_or(UNASSIGNED_BUCKET);
             upsert_focus_time_tx(
-                &tx,
+                conn,
                 &key.session_id,
                 key.todo_id.as_deref(),
                 bucket_key,
@@ -438,14 +539,8 @@ impl TimerCore {
                 *delta,
                 now,
             )?;
-            sessions.insert(key.session_id.as_str());
         }
 
-        for session_id in sessions {
-            update_checkpoint(&tx, session_id, now)?;
-        }
-
-        tx.commit()?;
         Ok(())
     }
 
@@ -897,6 +992,225 @@ mod tests {
             .unwrap();
         assert_eq!(rows, 1);
         assert_eq!(total, 3_000);
+    }
+
+    #[test]
+    fn switching_at_the_phase_boundary_credits_the_old_todo() {
+        let mut h = Harness::new();
+        let first = h.todo_id.clone().unwrap();
+        let second = h.second_todo();
+        h.start();
+        for _ in 0..1499 {
+            h.tick(1_000);
+        }
+
+        h.utc += 1_000;
+        h.mono += 1_000;
+        h.timer
+            .start_focus(&mut h.conn, Some(second.clone()), h.utc, h.mono, &h.day)
+            .unwrap();
+
+        let snapshot = h.snapshot();
+        assert_eq!(snapshot.state, TimerState::FocusRunning);
+        assert_eq!(snapshot.attributed_todo_id, Some(second.clone()));
+        assert_eq!(snapshot.completed_focus_count, 1);
+
+        let credit: Option<String> = h
+            .conn
+            .query_row(
+                "SELECT credit_todo_id FROM focus_sessions WHERE outcome = 'completed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(credit, Some(first.clone()));
+
+        let first_ms: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time WHERE todo_id = ?1",
+                [&first],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let second_ms: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time WHERE todo_id = ?1",
+                [&second],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(first_ms, FOCUS_MS);
+        assert_eq!(second_ms, 0);
+    }
+
+    #[test]
+    fn switching_after_a_large_delta_does_not_credit_the_gap() {
+        let mut h = Harness::new();
+        let first = h.todo_id.clone().unwrap();
+        let second = h.second_todo();
+        h.start();
+        h.tick(1_000);
+
+        h.utc += 60_000;
+        h.mono += 60_000;
+        h.timer
+            .start_focus(&mut h.conn, Some(second.clone()), h.utc, h.mono, &h.day)
+            .unwrap();
+        h.tick(1_000);
+
+        let snapshot = h.snapshot();
+        assert_eq!(snapshot.state, TimerState::FocusRunning);
+        assert_eq!(snapshot.attributed_todo_id, Some(second.clone()));
+
+        let first_ms: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time WHERE todo_id = ?1",
+                [&first],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let second_ms: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time WHERE todo_id = ?1",
+                [&second],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(first_ms, 1_000);
+        assert_eq!(second_ms, 1_000);
+    }
+
+    #[test]
+    fn failed_clear_credit_does_not_double_accrue_the_switch_interval() {
+        let mut h = Harness::new();
+        let first = h.todo_id.clone().unwrap();
+        let second = h.second_todo();
+        h.start();
+        h.tick(1_000);
+        h.conn
+            .execute_batch(
+                "CREATE TRIGGER fail_clear_credit
+                 BEFORE UPDATE OF credit_todo_id ON focus_sessions
+                 WHEN NEW.credit_todo_id IS NULL
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced clear credit failure');
+                 END;",
+            )
+            .unwrap();
+
+        h.utc += 1_000;
+        h.mono += 1_000;
+        assert!(
+            h.timer
+                .start_focus(&mut h.conn, Some(second.clone()), h.utc, h.mono, &h.day)
+                .is_err()
+        );
+
+        h.conn
+            .execute_batch("DROP TRIGGER fail_clear_credit;")
+            .unwrap();
+        h.utc += 1_000;
+        h.mono += 1_000;
+        h.timer
+            .start_focus(&mut h.conn, Some(second.clone()), h.utc, h.mono, &h.day)
+            .unwrap();
+
+        let first_ms: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time WHERE todo_id = ?1",
+                [&first],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let second_ms: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time WHERE todo_id = ?1",
+                [&second],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(first_ms, 3_000);
+        assert_eq!(second_ms, 0);
+    }
+
+    #[test]
+    fn failed_completion_transaction_keeps_session_active_and_retries() {
+        let mut h = Harness::new();
+        h.start();
+        for _ in 0..1499 {
+            h.tick(1_000);
+        }
+        h.conn
+            .execute_batch(
+                "CREATE TRIGGER fail_completed_focus_count
+                 BEFORE UPDATE ON settings
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced settings failure');
+                 END;",
+            )
+            .unwrap();
+
+        let failed = h.tick(1_000);
+        assert_eq!(failed.snapshot.state, TimerState::FocusRunning);
+        assert_eq!(failed.snapshot.completed_focus_count, 0);
+        assert!(failed.snapshot.persistence_warning.is_some());
+        assert!(failed.alert.is_none());
+        assert!(h.timer.has_pending());
+
+        let (outcome, ended_at): (String, Option<i64>) = h
+            .conn
+            .query_row("SELECT outcome, ended_at FROM focus_sessions", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(outcome, "active");
+        assert_eq!(ended_at, None);
+
+        let persisted_ms: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(persisted_ms, 1_499_000);
+
+        h.conn
+            .execute_batch("DROP TRIGGER fail_completed_focus_count;")
+            .unwrap();
+        let completed = h.tick(1_000);
+
+        assert_eq!(completed.snapshot.state, TimerState::BreakPending);
+        assert_eq!(completed.snapshot.completed_focus_count, 1);
+        assert_eq!(
+            completed.alert.as_ref().map(|alert| &alert.kind),
+            Some(&AlertKind::FocusComplete)
+        );
+        let total_ms: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let completed_sessions: i64 = h
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM focus_sessions WHERE outcome = 'completed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(total_ms, FOCUS_MS);
+        assert_eq!(completed_sessions, 1);
     }
 
     #[test]
