@@ -116,6 +116,11 @@ impl TimerCore {
                 ));
             }
             TimerState::FocusRunning | TimerState::FocusPaused => {
+                if self.elapsed_ms >= FOCUS_MS {
+                    self.complete_focus(conn, utc_ms)?;
+                    return self.start_focus(conn, todo_id, utc_ms, mono_ms, local_day);
+                }
+
                 if self.attributed_todo_id == todo_id {
                     if self.state == TimerState::FocusPaused {
                         self.state = TimerState::FocusRunning;
@@ -308,8 +313,13 @@ impl TimerCore {
                     data_changed = true;
                 }
             }
-            TimerState::FocusPaused => {
-                let _ = self.flush_pending(conn, utc_ms);
+            TimerState::FocusPaused
+            | TimerState::Idle
+            | TimerState::BreakPending
+            | TimerState::BreakPaused => {
+                if self.retry_pending(conn, utc_ms) {
+                    data_changed = true;
+                }
             }
             TimerState::BreakRunning => {
                 let delta = self.delta(mono_ms);
@@ -343,7 +353,6 @@ impl TimerCore {
                     });
                 }
             }
-            _ => {}
         }
 
         Ok(TickOutcome {
@@ -475,6 +484,14 @@ impl TimerCore {
             title: title.to_string(),
             body: body.to_string(),
         }
+    }
+
+    fn retry_pending(&mut self, conn: &mut Connection, now: i64) -> bool {
+        let had_pending = self.has_pending();
+        let had_warning = self.persistence_warning.is_some();
+        let succeeded = self.flush_pending(conn, now).is_ok();
+
+        succeeded && (had_pending || had_warning)
     }
 
     fn flush_pending(&mut self, conn: &mut Connection, now: i64) -> Result<(), AppError> {
@@ -1211,6 +1228,163 @@ mod tests {
             .unwrap();
         assert_eq!(total_ms, FOCUS_MS);
         assert_eq!(completed_sessions, 1);
+    }
+
+    #[test]
+    fn paused_switch_at_boundary_completes_after_failed_completion() {
+        let mut h = Harness::new();
+        let first = h.todo_id.clone().unwrap();
+        let second = h.second_todo();
+        h.start();
+        for _ in 0..1499 {
+            h.tick(1_000);
+        }
+        h.conn
+            .execute_batch(
+                "CREATE TRIGGER fail_completed_focus_count
+                 BEFORE UPDATE ON settings
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced settings failure');
+                 END;",
+            )
+            .unwrap();
+
+        let failed = h.tick(1_000);
+        assert_eq!(failed.snapshot.state, TimerState::FocusRunning);
+        h.timer.pause(&mut h.conn, h.utc).unwrap();
+        assert_eq!(h.snapshot().state, TimerState::FocusPaused);
+
+        h.utc += 1_000;
+        h.mono += 1_000;
+        assert!(
+            h.timer
+                .start_focus(&mut h.conn, Some(second.clone()), h.utc, h.mono, &h.day)
+                .is_err()
+        );
+        assert_eq!(h.snapshot().state, TimerState::FocusPaused);
+        assert_eq!(h.snapshot().completed_focus_count, 0);
+
+        h.conn
+            .execute_batch("DROP TRIGGER fail_completed_focus_count;")
+            .unwrap();
+        h.utc += 1_000;
+        h.mono += 1_000;
+        h.timer
+            .start_focus(&mut h.conn, Some(second.clone()), h.utc, h.mono, &h.day)
+            .unwrap();
+
+        let snapshot = h.snapshot();
+        assert_eq!(snapshot.state, TimerState::FocusRunning);
+        assert_eq!(snapshot.attributed_todo_id, Some(second));
+        assert_eq!(snapshot.completed_focus_count, 1);
+        assert_eq!(snapshot.persistence_warning, None);
+
+        let (outcome, credit): (String, Option<String>) = h
+            .conn
+            .query_row(
+                "SELECT outcome, credit_todo_id FROM focus_sessions WHERE outcome = 'completed'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(outcome, "completed");
+        assert_eq!(credit, Some(first.clone()));
+
+        let first_ms: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time WHERE todo_id = ?1",
+                [&first],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(first_ms, FOCUS_MS);
+    }
+
+    #[test]
+    fn idle_tick_retries_pending_after_end_focus_flush_failure() {
+        let mut h = Harness::new();
+        h.conn
+            .execute_batch(
+                "CREATE TRIGGER fail_focus_time BEFORE INSERT ON focus_time
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced checkpoint failure');
+                 END;",
+            )
+            .unwrap();
+
+        h.start();
+        h.tick(2_000);
+        assert!(h.timer.has_pending());
+        assert!(h.snapshot().persistence_warning.is_some());
+
+        h.timer.end_focus(&mut h.conn, h.utc).unwrap();
+        let idle = h.snapshot();
+        assert_eq!(idle.state, TimerState::Idle);
+        assert!(idle.persistence_warning.is_some());
+        assert!(h.timer.has_pending());
+
+        h.conn
+            .execute_batch("DROP TRIGGER fail_focus_time;")
+            .unwrap();
+        let outcome = h.tick(1_000);
+
+        assert!(outcome.data_changed);
+        assert!(!h.timer.has_pending());
+        assert_eq!(h.snapshot().persistence_warning, None);
+        let total: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(total, 2_000);
+    }
+
+    #[test]
+    fn start_focus_same_todo_at_boundary_completes_before_returning() {
+        let mut h = Harness::new();
+        let todo = h.todo_id.clone().unwrap();
+        h.start();
+        for _ in 0..1499 {
+            h.tick(1_000);
+        }
+        h.conn
+            .execute_batch(
+                "CREATE TRIGGER fail_completed_focus_count
+                 BEFORE UPDATE ON settings
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced settings failure');
+                 END;",
+            )
+            .unwrap();
+        let failed = h.tick(1_000);
+        assert_eq!(failed.snapshot.state, TimerState::FocusRunning);
+        h.conn
+            .execute_batch("DROP TRIGGER fail_completed_focus_count;")
+            .unwrap();
+
+        h.utc += 1_000;
+        h.mono += 1_000;
+        h.timer
+            .start_focus(&mut h.conn, Some(todo.clone()), h.utc, h.mono, &h.day)
+            .unwrap();
+
+        let snapshot = h.snapshot();
+        assert_eq!(snapshot.state, TimerState::FocusRunning);
+        assert_eq!(snapshot.attributed_todo_id, Some(todo));
+        assert_eq!(snapshot.completed_focus_count, 1);
+        let total: i64 = h
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(active_ms), 0) FROM focus_time",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(total, FOCUS_MS);
     }
 
     #[test]

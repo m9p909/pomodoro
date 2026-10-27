@@ -49,30 +49,38 @@ pub fn run() {
             let data_dir = match app.path().app_data_dir() {
                 Ok(data_dir) => data_dir,
                 Err(error) => {
-                    show_startup_failure(
-                        app.handle(),
-                        Path::new("<app data directory unavailable>"),
-                        &error,
-                    );
+                    show_startup_failure(app.handle(), data_dir_error_message(&error), &error);
                     return Ok(());
                 }
             };
             let db_path = data_dir.join("pomodoro.sqlite");
             if let Err(error) = std::fs::create_dir_all(&data_dir) {
-                show_startup_failure(app.handle(), &db_path, &error);
+                show_startup_failure(
+                    app.handle(),
+                    data_dir_create_error_message(&data_dir, &error),
+                    &error,
+                );
                 return Ok(());
             }
             let conn = match db::open(&db_path) {
                 Ok(conn) => conn,
                 Err(error) => {
-                    show_startup_failure(app.handle(), &db_path, &error);
+                    show_startup_failure(
+                        app.handle(),
+                        startup_error_message(&db_path, &error),
+                        &error,
+                    );
                     return Ok(());
                 }
             };
             let inner = match AppInner::new(conn, Arc::new(SystemClock::new())) {
                 Ok(inner) => inner,
                 Err(error) => {
-                    show_startup_failure(app.handle(), &db_path, &error);
+                    show_startup_failure(
+                        app.handle(),
+                        startup_error_message(&db_path, &error),
+                        &error,
+                    );
                     return Ok(());
                 }
             };
@@ -108,11 +116,22 @@ fn startup_error_message(db_path: &Path, error: &dyn Display) -> String {
     )
 }
 
-fn show_startup_failure(app: &tauri::AppHandle, db_path: &Path, error: &dyn Display) {
+fn data_dir_error_message(error: &dyn Display) -> String {
+    format!("Pomodoro could not determine its app data directory.\n\nError: {error}")
+}
+
+fn data_dir_create_error_message(data_dir: &Path, error: &dyn Display) -> String {
+    format!(
+        "Pomodoro could not create its app data directory.\n\nData directory: {}\n\nError: {error}",
+        data_dir.display()
+    )
+}
+
+fn show_startup_failure(app: &tauri::AppHandle, message: String, error: &dyn Display) {
     log::error!("startup failed: {error}");
     let handle = app.clone();
     app.dialog()
-        .message(startup_error_message(db_path, error))
+        .message(message)
         .title("Pomodoro could not start")
         .kind(MessageDialogKind::Error)
         .buttons(MessageDialogButtons::Ok)
@@ -196,5 +215,15 @@ mod tests {
 
         assert!(message.contains("/tmp/example/pomodoro.sqlite"));
         assert!(message.contains("disk full"));
+    }
+
+    #[test]
+    fn startup_data_dir_error_message_does_not_claim_a_database_path() {
+        let error = AppError::Storage("app data directory unavailable".to_string());
+        let message = data_dir_error_message(&error);
+
+        assert!(message.contains("app data directory"));
+        assert!(message.contains("app data directory unavailable"));
+        assert!(!message.contains("Database:"));
     }
 }
