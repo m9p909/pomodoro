@@ -301,6 +301,73 @@ describe("App", () => {
     await waitFor(() => expect(state.refreshData).toHaveBeenCalled());
   });
 
+  it("reorders active todos and appends completed ids for the command", async () => {
+    state.bootstrap.mockResolvedValue(
+      bootstrapData(timerSnapshot(), [
+        todo({ id: "a", title: "A", sortOrder: 0 }),
+        todo({ id: "b", title: "B", sortOrder: 1 }),
+        todo({ id: "c", title: "Done", sortOrder: 2, completedAt: 1 }),
+      ]),
+    );
+    const { getByRole } = render(App);
+    await waitFor(() => expect(getByRole("button", { name: "Move A down" })).toBeTruthy());
+
+    await fireEvent.click(getByRole("button", { name: "Move A down" }));
+
+    await waitFor(() => expect(state.reorderTodos).toHaveBeenCalledWith(["b", "a", "c"]));
+    expect(state.refreshData).toHaveBeenCalled();
+  });
+
+  it("updates a todo and refreshes", async () => {
+    state.bootstrap.mockResolvedValue(
+      bootstrapData(timerSnapshot(), [todo({ id: "a", title: "A" })]),
+    );
+    const { getByLabelText, getByRole } = render(App);
+    await waitFor(() => expect(getByRole("button", { name: "Edit A" })).toBeTruthy());
+
+    await fireEvent.click(getByRole("button", { name: "Edit A" }));
+    await fireEvent.input(getByLabelText("Edit todo title"), {
+      target: { value: "  Updated title  " },
+    });
+    await fireEvent.input(getByLabelText("Edit estimate (pomodoros)"), {
+      target: { value: "5" },
+    });
+    await fireEvent.click(getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(state.updateTodo).toHaveBeenCalledWith("a", "Updated title", 5));
+    expect(state.refreshData).toHaveBeenCalled();
+  });
+
+  it("toggles a todo completion and refreshes", async () => {
+    state.bootstrap.mockResolvedValue(
+      bootstrapData(timerSnapshot(), [todo({ id: "a", title: "A" })]),
+    );
+    const { getByLabelText } = render(App);
+    await waitFor(() => expect(getByLabelText("Mark A complete")).toBeTruthy());
+
+    await fireEvent.click(getByLabelText("Mark A complete"));
+
+    await waitFor(() => expect(state.setTodoCompleted).toHaveBeenCalledWith("a", true));
+    expect(state.refreshData).toHaveBeenCalled();
+  });
+
+  it("clears a command error after a successful todo command", async () => {
+    state.setMuted.mockRejectedValueOnce(new Error("Could not save mute state."));
+    const { getByLabelText, getByRole, getByText, queryByText } = render(App);
+    await waitFor(() => expect(getByText("Start unassigned")).toBeTruthy());
+
+    await fireEvent.click(getByText("Mute"));
+    await waitFor(() => expect(getByText("Could not save mute state.")).toBeTruthy());
+
+    await fireEvent.input(getByLabelText("New todo title"), {
+      target: { value: "Clean up" },
+    });
+    await fireEvent.click(getByRole("button", { name: "Add todo" }));
+
+    await waitFor(() => expect(state.createTodo).toHaveBeenCalledWith("Clean up", null));
+    await waitFor(() => expect(queryByText("Could not save mute state.")).toBeNull());
+  });
+
   it("keeps a newer timer snapshot that arrives while bootstrap is resolving", async () => {
     const pending = deferred<Bootstrap>();
     state.bootstrap.mockReturnValueOnce(pending.promise);

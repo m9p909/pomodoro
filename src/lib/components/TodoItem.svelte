@@ -111,8 +111,7 @@
     <span
       class="drag-handle"
       draggable="true"
-      role="img"
-      aria-label={`Drag ${todo.title} to reorder`}
+      aria-hidden="true"
       title="Drag to reorder"
       ondragstart={(event) => onDragStart?.(event)}
       ondragend={() => onDragEnd?.()}

@@ -81,6 +81,19 @@ describe("TodoList", () => {
     expect(p.onCreate).not.toHaveBeenCalled();
   });
 
+  it("blocks a non-integer estimate", async () => {
+    const p = props();
+    const { getByLabelText, getByRole } = render(TodoList, { props: p });
+    await fireEvent.input(getByLabelText("New todo title"), {
+      target: { value: "Task" },
+    });
+    await fireEvent.input(getByLabelText("Estimate (pomodoros)"), {
+      target: { value: "1.5" },
+    });
+    await fireEvent.click(getByRole("button", { name: "Add todo" }));
+    expect(p.onCreate).not.toHaveBeenCalled();
+  });
+
   it("shows completed todos in a collapsed section", () => {
     const p = props([todo({ id: "b", title: "Done task", completedAt: 1 })]);
     const { getByText } = render(TodoList, { props: p });
@@ -132,8 +145,8 @@ describe("TodoList", () => {
       todo({ id: "a", title: "A", sortOrder: 0 }),
       todo({ id: "b", title: "B", sortOrder: 1 }),
     ]);
-    const { getByLabelText, getByText } = render(TodoList, { props: p });
-    await fireEvent.dragStart(getByLabelText("Drag A to reorder"));
+    const { getAllByTitle, getByText } = render(TodoList, { props: p });
+    await fireEvent.dragStart(getAllByTitle("Drag to reorder")[0]);
     await fireEvent.drop(getByText("B").closest("li")!);
     expect(p.onReorder).toHaveBeenCalledWith(["b", "a"]);
   });

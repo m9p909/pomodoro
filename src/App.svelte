@@ -99,6 +99,7 @@
   async function createTodo(title: string, estimate: number | null) {
     try {
       await commands.createTodo(title, estimate);
+      commandError = null;
       await refresh();
     } catch (error) {
       showCommandError(error);
@@ -108,6 +109,7 @@
   async function updateTodo(id: string, title: string, estimate: number | null) {
     try {
       await commands.updateTodo(id, title, estimate);
+      commandError = null;
       await refresh();
     } catch (error) {
       showCommandError(error);
@@ -117,6 +119,7 @@
   async function toggleTodo(id: string, completed: boolean) {
     try {
       await commands.setTodoCompleted(id, completed);
+      commandError = null;
       await refresh();
     } catch (error) {
       showCommandError(error);
@@ -139,6 +142,7 @@
       );
       if (!confirmed) return;
       await commands.deleteTodo(id);
+      commandError = null;
       await refresh();
     } catch (error) {
       showCommandError(error);
@@ -152,6 +156,7 @@
       .map((todo) => todo.id);
     try {
       await commands.reorderTodos([...ids, ...completedIds]);
+      commandError = null;
       await refresh();
     } catch (error) {
       showCommandError(error);
