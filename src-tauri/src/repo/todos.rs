@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::collections::HashSet;
 
 use rusqlite::{Connection, OptionalExtension, Row, params};

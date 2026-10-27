@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::path::Path;
 use std::time::Duration;
 
@@ -53,6 +51,7 @@ CREATE TABLE settings (
 INSERT INTO settings (id, muted, completed_focus_count) VALUES (1, 0, 0);
 "#;
 
+#[allow(dead_code)]
 pub fn open(path: impl AsRef<Path>) -> Result<Connection, AppError> {
     let mut conn = Connection::open(path)?;
     configure(&conn, true)?;
@@ -60,6 +59,7 @@ pub fn open(path: impl AsRef<Path>) -> Result<Connection, AppError> {
     Ok(conn)
 }
 
+#[cfg(test)]
 pub fn open_in_memory() -> Result<Connection, AppError> {
     let mut conn = Connection::open_in_memory()?;
     configure(&conn, false)?;

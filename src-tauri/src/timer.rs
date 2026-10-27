@@ -1,5 +1,3 @@
-#![allow(dead_code)] // TODO: remove once the timer is wired into app state.
-
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension};
@@ -29,6 +27,7 @@ struct PendingKey {
     local_day: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct TickOutcome {
     pub snapshot: TimerSnapshot,
@@ -41,7 +40,6 @@ pub struct TimerCore {
     phase: Option<TimerPhase>,
     elapsed_ms: i64,
     session_id: Option<String>,
-    session_started_at: Option<i64>,
     attributed_todo_id: Option<String>,
     credit_todo_id: Option<String>,
     last_mono_ms: Option<u64>,
@@ -62,7 +60,6 @@ impl TimerCore {
             phase: None,
             elapsed_ms: 0,
             session_id: None,
-            session_started_at: None,
             attributed_todo_id: None,
             credit_todo_id: None,
             last_mono_ms: None,
@@ -143,7 +140,6 @@ impl TimerCore {
                 self.phase = Some(TimerPhase::Focus);
                 self.elapsed_ms = 0;
                 self.session_id = Some(session_id);
-                self.session_started_at = Some(utc_ms);
                 self.attributed_todo_id = todo_id.clone();
                 self.credit_todo_id = todo_id;
                 self.last_mono_ms = Some(mono_ms);
@@ -199,7 +195,6 @@ impl TimerCore {
                 self.phase = None;
                 self.elapsed_ms = 0;
                 self.session_id = None;
-                self.session_started_at = None;
                 self.attributed_todo_id = None;
                 self.credit_todo_id = None;
                 self.last_mono_ms = None;
@@ -229,7 +224,6 @@ impl TimerCore {
                 self.phase = None;
                 self.elapsed_ms = 0;
                 self.session_id = None;
-                self.session_started_at = None;
                 self.attributed_todo_id = None;
                 self.credit_todo_id = None;
                 self.last_mono_ms = None;
@@ -380,7 +374,6 @@ impl TimerCore {
         self.state = TimerState::BreakPending;
         self.elapsed_ms = 0;
         self.session_id = None;
-        self.session_started_at = None;
         self.attributed_todo_id = None;
         self.credit_todo_id = None;
         self.last_mono_ms = None;

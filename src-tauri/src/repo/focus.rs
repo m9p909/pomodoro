@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use rusqlite::{Connection, params};
 
 use crate::error::AppError;
@@ -75,6 +73,7 @@ pub fn clear_credit(conn: &Connection, session_id: &str) -> Result<(), AppError>
     Ok(())
 }
 
+#[cfg(test)]
 pub fn completed_credit_count(conn: &Connection, todo_id: &str) -> Result<i64, AppError> {
     let count = conn.query_row(
         "SELECT COUNT(*)

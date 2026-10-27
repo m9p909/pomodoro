@@ -1,8 +1,8 @@
-#![allow(dead_code)]
-
 use chrono::{Local, Utc};
-use std::sync::Mutex;
 use std::time::Instant;
+
+#[cfg(test)]
+use std::sync::Mutex;
 
 pub trait Clock: Send + Sync {
     fn utc_ms(&self) -> i64;
@@ -10,10 +10,12 @@ pub trait Clock: Send + Sync {
     fn local_day(&self) -> String;
 }
 
+#[allow(dead_code)]
 pub struct SystemClock {
     start: Instant,
 }
 
+#[allow(dead_code)]
 impl SystemClock {
     pub fn new() -> Self {
         Self {
@@ -42,10 +44,12 @@ impl Clock for SystemClock {
     }
 }
 
+#[cfg(test)]
 pub struct FakeClock {
     state: Mutex<(i64, u64, String)>,
 }
 
+#[cfg(test)]
 impl FakeClock {
     pub fn new(utc_ms: i64, mono_ms: u64, day: &str) -> Self {
         Self {
@@ -64,6 +68,7 @@ impl FakeClock {
     }
 }
 
+#[cfg(test)]
 impl Clock for FakeClock {
     fn utc_ms(&self) -> i64 {
         self.state.lock().unwrap().0
